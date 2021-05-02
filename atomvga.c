@@ -10,14 +10,14 @@
 #include <stdlib.h>
 
 #include "pico.h"
-#include "test.pio.h"
+#include "atomvga.pio.h"
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/scanvideo.h"
 #include "pico/scanvideo/composable_scanline.h"
 #include "pico/sync.h"
 #include "hardware/irq.h"
-#include "test_pattern.h"
+#include "atomvga.h"
 
 #define vga_mode vga_mode_320x240_60
 // #define vga_mode vga_mode_640x480_60
