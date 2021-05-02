@@ -1,0 +1,65 @@
+/**
+ * Copyright (c) 2021 Chris Moulang
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+*/
+
+
+.program test
+
+.define public PIN_A0 2
+.define PIN_1MHZ 18
+.define public PIN_R_NW 19
+.define public PIN_SEL1 26
+
+.define NOTHING 0b111
+.define ADDRESS_LOW 0b011
+.define ADDRESS_HIGH 0b101
+.define DATA 0b110
+
+.define tADDR 6
+.define tSELECT 4
+
+    set PINDIRS, 0b111
+.wrap_target
+start:
+    // Select A0-7
+    set PINS, ADDRESS_LOW
+
+    wait 0 GPIO PIN_1MHZ [tADDR]
+    jmp PIN read            ; jmp if PIN_R_NW
+    in PINS 8               ; read address 0-7
+
+    // Select A8-15
+    set PINS, ADDRESS_HIGH [tSELECT]
+    in PINS 8               ; read address 8-15
+
+    // Select D0-7
+    set PINS, DATA
+
+    wait 1 GPIO PIN_1MHZ    ; wait for clock
+    wait 0 GPIO PIN_1MHZ
+    in PINS 8               ; Read data
+    jmp start
+
+read:
+    wait 1 GPIO PIN_1MHZ    ; wait for clock
+    wait 0 GPIO PIN_1MHZ
+.wrap
+
+
+% c-sdk {
+// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+
+void test_program_init(PIO pio, uint sm, uint offset) {
+   pio_sm_config c = test_program_get_default_config(offset);
+   sm_config_set_jmp_pin 	(&c, test_PIN_R_NW);  	
+   sm_config_set_in_pins(&c, test_PIN_A0);
+   sm_config_set_set_pins(&c, test_PIN_SEL1, 3);
+//   sm_config_set_sideset(&c, 4, true, false);
+//   sm_config_set_sideset_pins(&c, test_PIN_SEL1);
+   sm_config_set_in_shift(&c, true, true, 24);
+   pio_sm_init(pio, sm, offset, &c);
+}
+
+%}
