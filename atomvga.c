@@ -264,11 +264,11 @@ const uint horizontal_offset = (vga_width - max_width) / 2;
 
 const uint debug_start = max_height + vertical_offset;
 
-uint16_t *add_margin(uint16_t *p)
+uint16_t *add_border(uint16_t *p, uint16_t border_colour, uint16_t len)
 {
     *p++ = COMPOSABLE_COLOR_RUN;
-    *p++ = 0;
-    *p++ = horizontal_offset - 3;
+    *p++ = border_colour;
+    *p++ = len - 3;
     return p;
 }
 
@@ -345,13 +345,11 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
     const uint mode = get_mode();
     const uint line_num = scanvideo_scanline_number(buffer->scanline_id);
     uint16_t *p = (uint16_t *)buffer->data;
-    uint relative_line_num = line_num - vertical_offset;
+    int relative_line_num = line_num - vertical_offset;
 
     if (line_num == 0) {
         update_debug_text();
     }
-
-    p = add_margin(p);
 
     uint16_t *palette = colour_palette;
     if (alt_colour())
@@ -359,72 +357,59 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
         palette += 4;
     }
 
-    if (line_num >= debug_start && line_num < (debug_start + 12))
+    // Graphics modes have a coloured border, text modes have a black border
+    uint16_t border_colour = (mode & 1) ? palette[0] : 0;
+    uint debug_end = debug ? debug_start + 12 : debug_start;
+
+    if (relative_line_num < 0 || line_num >= debug_end)
     {
-        p = do_text(buffer, line_num - debug_start, debug_text, p);
-    }
-    else if (!(mode & 1))
-    {
-        if (relative_line_num >= 0 && relative_line_num < (16 * 12))
+        // Add top/bottom borders
+        p = add_border(p, border_colour, vga_width);
+
+    } else {
+
+        // Add left border
+        p = add_border(p, border_colour, horizontal_offset);
+
+        if (line_num >= debug_start && line_num < debug_end)
         {
-            p = do_text(buffer, relative_line_num, (char *)memory + vdu_mem_start, p);
+            p = do_text(buffer, line_num - debug_start, debug_text, p);
         }
-    }
-    else
-    {
-
-        const uint height = get_height(mode);
-        relative_line_num = relative_line_num * height / 192;
-        if (relative_line_num >= 0 && relative_line_num < height)
+        else if (!(mode & 1))
+        {
+            if (relative_line_num >= 0 && relative_line_num < (16 * 12))
+            {
+                p = do_text(buffer, relative_line_num, (char *)memory + vdu_mem_start, p);
+            }
+        }
+        else
         {
 
-            uint vdu_address = vdu_mem_start + bytes_per_row(mode) * relative_line_num;
-            uint32_t *bp = (uint32_t *)memory + vdu_address / 4;
-
-
-            *p++ = COMPOSABLE_RAW_RUN;
-            *p++ = 0;
-            *p++ = 256 + 1 - 3;
-
-            const uint pixel_count = get_width(mode);
-            if (is_colour(mode))
+            const uint height = get_height(mode);
+            relative_line_num = relative_line_num * height / 192;
+            if (relative_line_num >= 0 && relative_line_num < height)
             {
-                for (uint pixel = 0; pixel < pixel_count; pixel++)
+
+                uint vdu_address = vdu_mem_start + bytes_per_row(mode) * relative_line_num;
+                uint32_t *bp = (uint32_t *)memory + vdu_address / 4;
+
+
+                *p++ = COMPOSABLE_RAW_RUN;
+                *p++ = border_colour;
+                *p++ = 256 + 1 - 3;
+
+                const uint pixel_count = get_width(mode);
+                if (is_colour(mode))
                 {
-                    uint32_t word;
-                    if ((pixel % 16) == 0)
+                    for (uint pixel = 0; pixel < pixel_count; pixel++)
                     {
-                        word = __builtin_bswap32(*bp++);
-                    }
-                    uint x = (word >> 30) & 0b11;
-                    uint16_t colour = palette[x];
-                    if (pixel_count == 256)
-                    {
-                        *p++ = colour;
-                    }
-                    else if (pixel_count == 128)
-                    {
-                        *p++ = colour;
-                        *p++ = colour;
-                    }
-                    else if (pixel_count == 64)
-                    {
-                        *p++ = colour;
-                        *p++ = colour;
-                        *p++ = colour;
-                        *p++ = colour;
-                    }
-                    word = word << 2;
-                }
-            }
-            else
-            {
-                for (uint i = 0; i < pixel_count / 32; i++)
-                {
-                    uint32_t b = __builtin_bswap32(*bp++);
-                    for (uint32_t mask = 0x80000000; mask > 0; mask = mask >> 1)
-                    {
-                        uint16_t colour = (b & mask) ? palette[0] : 0;
+                        uint32_t word;
+                        if ((pixel % 16) == 0)
+                        {
+                            word = __builtin_bswap32(*bp++);
+                        }
+                        uint x = (word >> 30) & 0b11;
+                        uint16_t colour = palette[x];
                         if (pixel_count == 256)
                         {
                             *p++ = colour;
@@ -441,10 +426,41 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                             *p++ = colour;
                             *p++ = colour;
                         }
+                        word = word << 2;
+                    }
+                }
+                else
+                {
+                    for (uint i = 0; i < pixel_count / 32; i++)
+                    {
+                        uint32_t b = __builtin_bswap32(*bp++);
+                        for (uint32_t mask = 0x80000000; mask > 0; mask = mask >> 1)
+                        {
+                            uint16_t colour = (b & mask) ? palette[0] : 0;
+                            if (pixel_count == 256)
+                            {
+                                *p++ = colour;
+                            }
+                            else if (pixel_count == 128)
+                            {
+                                *p++ = colour;
+                                *p++ = colour;
+                            }
+                            else if (pixel_count == 64)
+                            {
+                                *p++ = colour;
+                                *p++ = colour;
+                                *p++ = colour;
+                                *p++ = colour;
+                            }
+                        }
                     }
                 }
             }
         }
+
+        // Add right border
+        p = add_border(p, border_colour, horizontal_offset);
     }
 
     // 32 * 3, so we should be word aligned
