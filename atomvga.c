@@ -314,11 +314,15 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                     colour_index += 4;
 
                 uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
+
+#ifdef SUPPORT_LOWER_CASE
                 if (ch >= 0x80 && ch < 0xA0)
                 {
                     b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
                 }
-                else if (ch >= 0xA0 && ch < 0xC0)
+                else
+#endif
+                if (ch >= 0x80)
                 {
                     b = ~b;
                 }
