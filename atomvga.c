@@ -199,7 +199,7 @@ bool is_command(char* cmd) {
 
 int main(void)
 {
-    uint base_freq = 48000;
+    uint base_freq = 50000;
 
     set_sys_clock_khz(base_freq * 3, true);
     setup_default_uart();
