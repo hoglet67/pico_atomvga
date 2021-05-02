@@ -153,7 +153,7 @@ uint16_t colour_palette_improved[4] = {
     MAGENTA,
 };
 
-uint16_t *colour_palette = colour_palette_improved;
+uint16_t *colour_palette = colour_palette_atom;
 
 inline bool is_colour(uint mode)
 {
