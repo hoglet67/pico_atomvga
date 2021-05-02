@@ -353,6 +353,11 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
     p = add_margin(p);
 
+    uint16_t *palette = colour_palette;
+    if (alt_colour())
+    {
+        palette += 4;
+    }
 
     if (line_num >= debug_start && line_num < (debug_start + 12))
     {
@@ -392,7 +397,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                         word = __builtin_bswap32(*bp++);
                     }
                     uint x = (word >> 30) & 0b11;
-                    uint16_t colour = colour_palette[x];
+                    uint16_t colour = palette[x];
                     if (pixel_count == 256)
                     {
                         *p++ = colour;
@@ -419,7 +424,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                     uint32_t b = __builtin_bswap32(*bp++);
                     for (uint32_t mask = 0x80000000; mask > 0; mask = mask >> 1)
                     {
-                        uint16_t colour = (b & mask) ? WHITE : 0;
+                        uint16_t colour = (b & mask) ? palette[0] : 0;
                         if (pixel_count == 256)
                         {
                             *p++ = colour;

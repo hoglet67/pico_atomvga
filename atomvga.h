@@ -139,11 +139,15 @@ uint16_t text_palette[8] = {
 
 };
 
-uint16_t colour_palette_atom[4] = {
+uint16_t colour_palette_atom[8] = {
     GREEN,
     YELLOW,
     BLUE,
     RED,
+    WHITE,
+    CYAN,
+    MAGENTA,
+    ORANGE,
 };
 
 uint16_t colour_palette_improved[4] = {
