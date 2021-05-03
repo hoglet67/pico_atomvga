@@ -197,6 +197,8 @@ bool is_command(char* cmd) {
     return false;
 }
 
+volatile bool support_lower = false;
+
 int main(void)
 {
     uint base_freq = 50000;
@@ -241,8 +243,12 @@ int main(void)
         static int x = 0;
         if (is_command("DEBUG")) {
             debug = true;
-        } else if (is_command("DEBUG OFF")) {
+        } else if (is_command("NODEBUG")) {
             debug = false;
+        } else if (is_command("LOWER")) {
+            support_lower = true;
+        } else if (is_command("NOLOWER")) {
+            support_lower = false;
         }
         gpio_put(LED_PIN, 0);
         sleep_ms(20);
@@ -315,14 +321,11 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
 
                 uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
 
-#ifdef SUPPORT_LOWER_CASE
-                if (ch >= 0x80 && ch < 0xA0)
+                if (support_lower && ch >= 0x80 && ch < 0xA0)
                 {
                     b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
                 }
-                else
-#endif
-                if (ch >= 0x80)
+                else if (ch >= 0x80)
                 {
                     b = ~b;
                 }
