@@ -372,7 +372,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
     } else {
 
         // Add left border
-        p = add_border(p, border_colour, horizontal_offset);
+        p = add_border(p, border_colour, horizontal_offset - 1);
 
         if (line_num >= debug_start && line_num < debug_end)
         {
