@@ -28,6 +28,7 @@ const uint SEL2_PIN = test_PIN_SEL1 + 1;
 const uint SEL3_PIN = test_PIN_SEL1 + 2;
 
 static PIO pio = pio1;
+static uint8_t *fontdata = fontdata_6847;
 
 // Initialise the GPIO pins - overrides whatever the scanvideo library did
 static void initialiseIO()
@@ -249,6 +250,10 @@ int main(void)
             support_lower = true;
         } else if (is_command("NOLOWER")) {
             support_lower = false;
+        } else if (is_command("CHARSET0")) {
+           fontdata = fontdata_6847;
+        } else if (is_command("CHARSET1")) {
+           fontdata = fontdata_6847t1;
         }
         gpio_put(LED_PIN, 0);
         sleep_ms(20);
