@@ -254,6 +254,8 @@ int main(void)
            fontdata = fontdata_6847;
         } else if (is_command("CHARSET1")) {
            fontdata = fontdata_6847t1;
+        } else if (is_command("CHARSET2")) {
+           fontdata = fontdata_6847t1_alt;
         }
         gpio_put(LED_PIN, 0);
         sleep_ms(20);
