@@ -19,6 +19,12 @@
 #include "hardware/irq.h"
 #include "atomvga.h"
 
+// This base address of the 8255 PIA
+#define PIA_ADDR 0xB000
+
+// The base address of the FRame Buffer
+#define FB_ADDR  0x8000
+
 #define vga_mode vga_mode_320x240_60
 // #define vga_mode vga_mode_640x480_60
 
@@ -77,12 +83,12 @@ volatile uint8_t memory[0x10000];
 
 int get_mode()
 {
-    return (memory[0xB000] & 0xf0) >> 4;
+    return (memory[PIA_ADDR] & 0xf0) >> 4;
 }
 
 bool alt_colour()
 {
-    return !!(memory[0xB002] & 0x8);
+    return !!(memory[PIA_ADDR + 2] & 0x8);
 }
 
 void pscreen()
@@ -96,12 +102,12 @@ void pscreen()
         printf("|");
         for (int col = 0; col < 32; col++)
         {
-            unsigned char c = memory[row * 32 + col + 0x8000];
+            unsigned char c = memory[row * 32 + col + FB_ADDR];
             if (c < 0x80)
             {
                 c = c ^ 0x60;
             }
-            c = c - 0X20;
+            c = c - 0x20;
             c = isprint(c) ? c : '.';
             printf(" %c", c);
         }
@@ -120,7 +126,7 @@ static void irq_handler()
         u_int16_t address = (reg & 0x00FFFF00) >> 8;
         u_int8_t data = (reg & 0xFF000000) >> 24;
         memory[address] = data;
-        if (address >= 0x8000 && address < 0x8200 || address == 0xB000)
+        if (address >= FB_ADDR && address < FB_ADDR + 0x200 || address == PIA_ADDR)
         {
             updated = true;
             gpio_put(LED_PIN, 1);
@@ -209,7 +215,7 @@ int main(void)
 
     stdio_init_all();
 
-    for (uint i = 0x8000; i < 0x8200; i++)
+    for (uint i = FB_ADDR; i < FB_ADDR + 0x200; i++)
     {
         memory[i] = rand();
     }
@@ -262,8 +268,8 @@ int main(void)
     }
 }
 
-const uint vdu_mem_start = 0x8000;
-const uint vdu_mem_end = 0x9800;
+const uint vdu_mem_start = FB_ADDR;
+const uint vdu_mem_end = FB_ADDR + 0x1800;
 const uint chars_per_row = 32;
 
 const uint vga_width = 320;
