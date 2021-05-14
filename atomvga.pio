@@ -17,34 +17,29 @@
 .define ADDRESS_HIGH 0b101
 .define DATA 0b110
 
-.define tADDR 6
 .define tSELECT 4
 
-    set PINDIRS, 0b111
-.wrap_target
-start:
-    // Select A0-7
-    set PINS, ADDRESS_LOW
+    set PINDIRS, 0b111      ; set as output
+    set PINS, ADDRESS_LOW   ; select address low byte
 
-    wait 0 GPIO PIN_1MHZ [tADDR]
-    jmp PIN read            ; jmp if PIN_R_NW
+retry:
+    wait 0 GPIO PIN_1MHZ    ; wait for clock -> 0
+
+.wrap_target
+    wait 1 GPIO PIN_1MHZ    ; wait for clock 0 -> 1
+    jmp PIN retry           ; wait for next clock cycle if not a write
+
     in PINS 8               ; read address 0-7
 
-    // Select A8-15
     set PINS, ADDRESS_HIGH [tSELECT]
     in PINS 8               ; read address 8-15
 
-    // Select D0-7
-    set PINS, DATA
+    set PINS, DATA          ; select data
 
-    wait 1 GPIO PIN_1MHZ    ; wait for clock
-    wait 0 GPIO PIN_1MHZ
-    in PINS 8               ; Read data
-    jmp start
+    wait 0 GPIO PIN_1MHZ    ; wait for clock 1 -> 0
+    in PINS 8               ; read data
 
-read:
-    wait 1 GPIO PIN_1MHZ    ; wait for clock
-    wait 0 GPIO PIN_1MHZ
+    set PINS, ADDRESS_LOW
 .wrap
 
 
