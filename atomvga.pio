@@ -3,8 +3,6 @@
  *
  * SPDX-License-Identifier: BSD-3-Clause
 */
-
-
 .program test
 
 .define public PIN_A0 2
@@ -17,29 +15,23 @@
 .define ADDRESS_HIGH 0b101
 .define DATA 0b110
 
-.define tSELECT 4
+.define tSELECT 3   ; = 20nS at 150MHz
+.side_set 3
 
-    set PINDIRS, 0b111      ; set as output
-    set PINS, ADDRESS_LOW   ; select address low byte
-
+    set PINDIRS, 0b111      side ADDRESS_LOW            ; set as output
 retry:
-    wait 0 GPIO PIN_1MHZ    ; wait for clock -> 0
+    mov ISR, x              side ADDRESS_LOW            ; clear ISR
+    wait 0 GPIO PIN_1MHZ    side ADDRESS_LOW            ; wait for clock -> 0
 
 .wrap_target
-    wait 1 GPIO PIN_1MHZ    ; wait for clock 0 -> 1
-    jmp PIN retry           ; wait for next clock cycle if not a write
+    wait 1 GPIO PIN_1MHZ    side ADDRESS_LOW            ; wait for clock 0 -> 1
 
-    in PINS 8               ; read address 0-7
+    in PINS 8               side ADDRESS_HIGH           ; read address 0-7 
+    jmp PIN retry           side ADDRESS_HIGH [tSELECT] ; wait for next clock cycle if not a write
+    in PINS 8               side DATA                   ; read address 8-15
 
-    set PINS, ADDRESS_HIGH [tSELECT]
-    in PINS 8               ; read address 8-15
-
-    set PINS, DATA          ; select data
-
-    wait 0 GPIO PIN_1MHZ    ; wait for clock 1 -> 0
-    in PINS 8               ; read data
-
-    set PINS, ADDRESS_LOW
+    wait 0 GPIO PIN_1MHZ    side DATA                   ; wait for clock 1 -> 0
+    in PINS 8               side ADDRESS_LOW            ; read data
 .wrap
 
 
@@ -51,8 +43,10 @@ void test_program_init(PIO pio, uint sm, uint offset) {
    sm_config_set_jmp_pin 	(&c, test_PIN_R_NW);  	
    sm_config_set_in_pins(&c, test_PIN_A0);
    sm_config_set_set_pins(&c, test_PIN_SEL1, 3);
-//   sm_config_set_sideset(&c, 4, true, false);
-//   sm_config_set_sideset_pins(&c, test_PIN_SEL1);
+
+   sm_config_set_sideset(&c, 3, false, false);
+   sm_config_set_sideset_pins(&c, test_PIN_SEL1);
+   
    sm_config_set_in_shift(&c, true, true, 24);
    pio_sm_init(pio, sm, offset, &c);
 }
