@@ -14,6 +14,8 @@ add_executable(atomvga
 
 pico_generate_pio_header(atomvga ${CMAKE_CURRENT_LIST_DIR}/atomvga.pio)
 
+pico_generate_pio_header(atomvga ${CMAKE_CURRENT_LIST_DIR}/atomvga_out.pio)
+
 target_link_libraries(atomvga PRIVATE
   pico_multicore
   pico_stdlib

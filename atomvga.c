@@ -11,6 +11,7 @@
 
 #include "pico.h"
 #include "atomvga.pio.h"
+#include "atomvga_out.pio.h"
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/scanvideo.h"
@@ -48,6 +49,7 @@ static void initialiseIO()
     {
         gpio_init(pin);
         gpio_set_dir(pin, false);
+        gpio_set_function(pin, GPIO_FUNC_PIO1);
     }
 
     // Output enable for the 74lvc245 buffers
@@ -65,12 +67,6 @@ static void initialiseIO()
 }
 
 void core1_func();
-
-// Simple color bar program, which draws 7 colored bars: red, green, yellow, blow, magenta, cyan, white
-// Can be used to check resister DAC correctness.
-//
-// Note this program also demonstrates running video on core 1, leaving core 0 free. It supports
-// user input over USB or UART stdin, although all it does with it is invert the colors when you press SPACE
 
 static semaphore_t video_initted;
 static bool invert;
@@ -120,16 +116,27 @@ void pscreen()
 
 static void irq_handler()
 {
+    static int count = 0;
     while (!pio_sm_is_rx_fifo_empty(pio, 0))
     {
         u_int32_t reg = pio_sm_get_blocking(pio, 0);
-        u_int16_t address = (reg & 0x00FFFF00) >> 8;
-        u_int8_t data = (reg & 0xFF000000) >> 24;
-        memory[address] = data;
-        if (address >= FB_ADDR && address < FB_ADDR + 0x200 || address == PIA_ADDR)
+        u_int16_t address = reg & 0xFFFF;
+        if (reg & 0x1000000)
         {
-            updated = true;
-            gpio_put(LED_PIN, 1);
+            if (address = 0xBDE0)
+            {
+                pio_sm_put(pio, 1, count++);
+            }
+        }
+        else
+        {
+            u_int8_t data = (reg & 0xFF0000) >> 16;
+            memory[address] = data;
+            if (address >= FB_ADDR && address < FB_ADDR + 0x200 || address == PIA_ADDR)
+            {
+                updated = true;
+                gpio_put(LED_PIN, 1);
+            }
         }
     }
 }
@@ -138,7 +145,7 @@ const uint debug_test_len = 32;
 
 char debug_text[32];
 
-bool debug = false;
+volatile bool debug = false;
 
 void set_debug_text(char *text)
 {
@@ -161,10 +168,8 @@ void set_debug_text(char *text)
 
 void update_debug_text()
 {
-
     if (debug)
     {
-
         char buffer[40];
         uint mode = get_mode();
 
@@ -208,6 +213,40 @@ bool is_command(char *cmd)
 
 volatile bool support_lower = false;
 
+ void __no_inline_not_in_flash_func(main_loop())
+{
+    while (true)
+    {
+        // Get event from SM 0
+        u_int32_t reg = pio_sm_get_blocking(pio, 0);
+
+        // Get the address
+        u_int16_t address = reg & 0xFFFF;
+
+        // Is it a read or write opertaion?
+        if (reg & 0x1000000)
+        {
+            // read
+            if (address == 0xBDE0)
+            {
+                uint8_t b = memory[0xBDE0];
+                pio_sm_put(pio, 1, 0xFF | (b << 8));
+            }
+            else if (address == 0xBDEF)
+            {
+                uint8_t b = 0x12;
+                pio_sm_put(pio, 1, 0xFF | (b << 8));
+            }
+        }
+        else
+        {
+            // write
+            u_int8_t data = (reg & 0xFF0000) >> 16;
+            memory[address] = data;
+        }
+    }
+}
+
 int main(void)
 {
     uint base_freq = 50000;
@@ -237,10 +276,12 @@ int main(void)
     test_program_init(pio, 0, offset);
     pio_sm_set_enabled(pio, 0, true);
 
-    pio->inte0 = PIO_IRQ0_INTE_SM0_RXNEMPTY_BITS;
-    irq_set_exclusive_handler(PIO1_IRQ_0, irq_handler);
-    irq_set_priority(PIO1_IRQ_0, 0x00);
-    irq_set_enabled(PIO1_IRQ_0, true);
+    offset = pio_add_program(pio, &atomvga_out_program);
+    atomvga_out_program_init(pio, 1, offset);
+    pio_sm_set_enabled(pio, 1, true);
+
+    main_loop();
+
 
     set_debug_text("Acorn Atom VGA Adapter");
 
@@ -494,9 +535,6 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
         // Add right border
         p = add_border(p, border_colour, horizontal_offset);
     }
-
-    // 32 * 3, so we should be word aligned
-    //assert(!(3u & (uintptr_t)p));
 
     // black pixel to end line
     *p++ = COMPOSABLE_RAW_1P;

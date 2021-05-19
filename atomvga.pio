@@ -15,23 +15,44 @@
 .define ADDRESS_HIGH 0b101
 .define DATA 0b110
 
-.define tSELECT 3   ; = 20nS at 150MHz
-.side_set 3
-
+//.define tSELECT 3   ; = 20nS at 150MHz
+.side_set 3 opt
+    set y 1
     set PINDIRS, 0b111      side ADDRESS_LOW            ; set as output
-retry:
-    mov ISR, x              side ADDRESS_LOW            ; clear ISR
-    wait 0 GPIO PIN_1MHZ    side ADDRESS_LOW            ; wait for clock -> 0
 
+
+;retry:
+;    mov ISR, x              side ADDRESS_LOW            ; clear ISR
+;    wait 0 GPIO PIN_1MHZ                                ; wait for clock -> 0
+
+loop:
 .wrap_target
-    wait 1 GPIO PIN_1MHZ    side ADDRESS_LOW            ; wait for clock 0 -> 1
+    nop                     side ADDRESS_LOW
+    wait 1 GPIO PIN_1MHZ                                ; wait for clock 0 -> 1
 
     in PINS 8               side ADDRESS_HIGH           ; read address 0-7 
-    jmp PIN retry           side ADDRESS_HIGH [tSELECT] ; wait for next clock cycle if not a write
+    jmp PIN handle_read                                 ; wait for next clock cycle if not a write
+    nop [1]
+    nop
     in PINS 8               side DATA                   ; read address 8-15
 
-    wait 0 GPIO PIN_1MHZ    side DATA                   ; wait for clock 1 -> 0
+    wait 0 GPIO PIN_1MHZ                                ; wait for clock 1 -> 0
     in PINS 8               side ADDRESS_LOW            ; read data
+    in x 8
+    jmp loop
+
+handle_read:
+    nop [1]
+    nop
+    in PINS 8                                           ; read address 8-15
+
+    in y 8
+    in y 8
+    wait 0 GPIO PIN_1MHZ                                ; wait for clock 1 -> 0
+
+    jmp loop                
+
+ 
 .wrap
 
 
@@ -44,10 +65,10 @@ void test_program_init(PIO pio, uint sm, uint offset) {
    sm_config_set_in_pins(&c, test_PIN_A0);
    sm_config_set_set_pins(&c, test_PIN_SEL1, 3);
 
-   sm_config_set_sideset(&c, 3, false, false);
+   sm_config_set_sideset(&c, 4, true, false);
    sm_config_set_sideset_pins(&c, test_PIN_SEL1);
    
-   sm_config_set_in_shift(&c, true, true, 24);
+   sm_config_set_in_shift(&c, true, true, 32);
    pio_sm_init(pio, sm, offset, &c);
 }
 

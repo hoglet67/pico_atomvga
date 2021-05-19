@@ -1,0 +1,44 @@
+/**
+ * Copyright (c) 2021 Chris Moulang
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+*/
+.program atomvga_out
+
+.define public PIN_A0 2
+.define PIN_1MHZ 18
+.define PIN_R_NW 19
+.define public PIN_SEL1 26
+
+.define NOTHING 0b111
+.define ADDRESS_LOW 0b011
+.define ADDRESS_HIGH 0b101
+.define DATA 0b110
+
+.side_set 3 opt
+
+.wrap_target
+    pull block
+    out PINDIRS 8           side DATA
+    out PINS 8 [1]          side DATA
+    wait 0 GPIO PIN_1MHZ                                ; wait for clock 0 
+    out PINDIRS 8           side ADDRESS_LOW
+.wrap
+
+
+% c-sdk {
+// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+
+void atomvga_out_program_init(PIO pio, uint sm, uint offset) {
+   pio_sm_config c = atomvga_out_program_get_default_config(offset);
+
+   sm_config_set_out_pins(&c, atomvga_out_PIN_A0, 8);
+   sm_config_set_set_pins(&c, atomvga_out_PIN_A0, 8);
+
+   sm_config_set_sideset(&c, 4, true, false);
+   sm_config_set_sideset_pins(&c, atomvga_out_PIN_SEL1);
+
+   pio_sm_init(pio, sm, offset, &c);
+}
+
+%}
