@@ -23,7 +23,7 @@
 #define PIA_ADDR 0xB000
 
 // The base address of the FRame Buffer
-#define FB_ADDR  0x8000
+#define FB_ADDR 0x8000
 
 #define vga_mode vga_mode_320x240_60
 // #define vga_mode vga_mode_640x480_60
@@ -138,7 +138,6 @@ const uint debug_test_len = 32;
 
 char debug_text[32];
 
-
 bool debug = false;
 
 void set_debug_text(char *text)
@@ -189,15 +188,18 @@ void update_debug_text()
     }
 }
 
-bool is_command(char* cmd) {
-    char* p=(char*)memory + 0xf000;
+bool is_command(char *cmd)
+{
+    char *p = (char *)memory + 0xf000;
     while (*cmd != 0)
     {
-        if (*cmd++ != *p++) {
+        if (*cmd++ != *p++)
+        {
             return false;
         }
     }
-    if (*p == 0xD) {
+    if (*p == 0xD)
+    {
         *p = 0;
         return true;
     }
@@ -248,20 +250,33 @@ int main(void)
     {
 
         static int x = 0;
-        if (is_command("DEBUG")) {
+        if (is_command("DEBUG"))
+        {
             debug = true;
-        } else if (is_command("NODEBUG")) {
+        }
+        else if (is_command("NODEBUG"))
+        {
             debug = false;
-        } else if (is_command("LOWER")) {
+        }
+        else if (is_command("LOWER"))
+        {
             support_lower = true;
-        } else if (is_command("NOLOWER")) {
+        }
+        else if (is_command("NOLOWER"))
+        {
             support_lower = false;
-        } else if (is_command("CHARSET0")) {
-           fontdata = fontdata_6847;
-        } else if (is_command("CHARSET1")) {
-           fontdata = fontdata_6847t1;
-        } else if (is_command("CHARSET2")) {
-           fontdata = fontdata_gime;
+        }
+        else if (is_command("CHARSET0"))
+        {
+            fontdata = fontdata_6847;
+        }
+        else if (is_command("CHARSET1"))
+        {
+            fontdata = fontdata_6847t1;
+        }
+        else if (is_command("CHARSET2"))
+        {
+            fontdata = fontdata_gime;
         }
         gpio_put(LED_PIN, 0);
         sleep_ms(20);
@@ -317,10 +332,10 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? colour : 0;
                 *p++ = COMPOSABLE_COLOR_RUN;
                 *p++ = pix1;
-                *p++ = 4 -3;
+                *p++ = 4 - 3;
                 *p++ = COMPOSABLE_COLOR_RUN;
                 *p++ = pix0;
-                *p++ = 4 -3;
+                *p++ = 4 - 3;
             }
             else
             {
@@ -363,7 +378,8 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
     uint16_t *p = (uint16_t *)buffer->data;
     int relative_line_num = line_num - vertical_offset;
 
-    if (line_num == 0) {
+    if (line_num == 0)
+    {
         update_debug_text();
     }
 
@@ -381,8 +397,9 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
     {
         // Add top/bottom borders
         p = add_border(p, border_colour, vga_width);
-
-    } else {
+    }
+    else
+    {
 
         // Add left border
         p = add_border(p, border_colour, horizontal_offset - 1);
@@ -408,7 +425,6 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
                 uint vdu_address = vdu_mem_start + bytes_per_row(mode) * relative_line_num;
                 uint32_t *bp = (uint32_t *)memory + vdu_address / 4;
-
 
                 *p++ = COMPOSABLE_RAW_RUN;
                 *p++ = border_colour;
