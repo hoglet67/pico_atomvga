@@ -213,7 +213,7 @@ bool is_command(char *cmd)
 
 volatile bool support_lower = false;
 
- void __no_inline_not_in_flash_func(main_loop())
+void __no_inline_not_in_flash_func(main_loop())
 {
     while (true)
     {
@@ -281,46 +281,37 @@ int main(void)
     pio_sm_set_enabled(pio, 1, true);
 
     main_loop();
+}
 
-
-    set_debug_text("Acorn Atom VGA Adapter");
-
-    volatile char *command;
-
-    while (true)
+void check_command()
+{
+    if (is_command("DEBUG"))
     {
-
-        static int x = 0;
-        if (is_command("DEBUG"))
-        {
-            debug = true;
-        }
-        else if (is_command("NODEBUG"))
-        {
-            debug = false;
-        }
-        else if (is_command("LOWER"))
-        {
-            support_lower = true;
-        }
-        else if (is_command("NOLOWER"))
-        {
-            support_lower = false;
-        }
-        else if (is_command("CHARSET0"))
-        {
-            fontdata = fontdata_6847;
-        }
-        else if (is_command("CHARSET1"))
-        {
-            fontdata = fontdata_6847t1;
-        }
-        else if (is_command("CHARSET2"))
-        {
-            fontdata = fontdata_gime;
-        }
-        gpio_put(LED_PIN, 0);
-        sleep_ms(20);
+        debug = true;
+    }
+    else if (is_command("NODEBUG"))
+    {
+        debug = false;
+    }
+    else if (is_command("LOWER"))
+    {
+        support_lower = true;
+    }
+    else if (is_command("NOLOWER"))
+    {
+        support_lower = false;
+    }
+    else if (is_command("CHARSET0"))
+    {
+        fontdata = fontdata_6847;
+    }
+    else if (is_command("CHARSET1"))
+    {
+        fontdata = fontdata_6847t1;
+    }
+    else if (is_command("CHARSET2"))
+    {
+        fontdata = fontdata_gime;
     }
 }
 
@@ -421,6 +412,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
     if (line_num == 0)
     {
+        check_command();
         update_debug_text();
     }
 
