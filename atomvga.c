@@ -246,6 +246,11 @@ void __no_inline_not_in_flash_func(main_loop())
             // write
             u_int8_t data = (reg & 0xFF0000) >> 16;
             memory[address] = data;
+
+            // hack to reset the vga80x40 mode when BREAK is pressed
+            if (address == 0xb003 && data == 0x8a) {
+               memory[0xBDE0] = 0;
+            }
         }
     }
 }
