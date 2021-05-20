@@ -38,6 +38,8 @@ const uint SEL3_PIN = test_PIN_SEL1 + 2;
 static PIO pio = pio1;
 static uint8_t *fontdata = fontdata_6847;
 
+static uint32_t vga80_lut[128 * 4];
+
 // Initialise the GPIO pins - overrides whatever the scanvideo library did
 static void initialiseIO()
 {
@@ -250,7 +252,7 @@ void __no_inline_not_in_flash_func(main_loop())
 
 int main(void)
 {
-    uint sys_freq = 300000;
+    uint sys_freq = 200000;
     if (sys_freq > 250000) {
         vreg_set_voltage(VREG_VOLTAGE_1_25);
     }
@@ -568,6 +570,19 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 }
 
 
+// Use an LUT to allow two pixels to be calculated at once, taking account of the attribute byte for colours
+//
+// Bit  8  7  6  5  4  3  2  1   0
+//      --bgc--  x  --fgc--  p1 p0
+//
+void generate_vga80_lut()
+{
+    for (int i = 0; i < 128 * 4; i++) {
+        vga80_lut[i] =  ((i & 1) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]) << 16;
+        vga80_lut[i] |= ((i & 2) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]);
+    }
+}
+
 uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, uint16_t *p)
 {
     // Screen is 80 columns by 40 rows
@@ -586,7 +601,11 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
 
         *p++ = COMPOSABLE_RAW_RUN;
         *p++ = 0;
-        *p++ = 641 - 3;
+        *p++ = 642 - 3;
+        *p++ = 0;
+
+        // For efficiency, compute two pixels at a time using a lookup table
+        uint32_t *q = (uint32_t *)p;
 
         if (vga80_ctrl1 & 0x08)
         {
@@ -600,21 +619,17 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
             {
                 uint ch     = *char_addr++;
                 uint attr   = *attr_addr++;
-                uint fg_col = colour_palette_vga80[attr & 7];
-                uint bg_col = colour_palette_vga80[(attr >> 4) & 7];
+                uint32_t *vp = vga80_lut + ((attr & 0x77) << 2);
                 if (attr & 0x80)
                 {
                     // Semi Graphics
-                    uint16_t pix1 = (ch & smask1) ? fg_col : bg_col;
-                    uint16_t pix0 = (ch & smask0) ? fg_col : bg_col;
-                    *p++ = pix1;
-                    *p++ = pix1;
-                    *p++ = pix1;
-                    *p++ = pix1;
-                    *p++ = pix0;
-                    *p++ = pix0;
-                    *p++ = pix0;
-                    *p++ = pix0;
+
+                    uint32_t p1 = (ch & smask1) ? *(vp + 3) : *vp;
+                    uint32_t p0 = (ch & smask0) ? *(vp + 3) : *vp;
+                    *q++ = p1;
+                    *q++ = p1;
+                    *q++ = p0;
+                    *q++ = p0;
                 }
                 else
                 {
@@ -624,30 +639,24 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                     {
                         b = ~b;
                     }
-#if 0
-                    // TODO: Underlined; currently this pushes it over the edge at 300MHz
+                    // Underlined
                     if (attr & 0x08)
                     {
                         b |= ulmask;
                     }
-#endif
-                    *p++ = (b & 0x80) ? fg_col : bg_col;
-                    *p++ = (b & 0x40) ? fg_col : bg_col;
-                    *p++ = (b & 0x20) ? fg_col : bg_col;
-                    *p++ = (b & 0x10) ? fg_col : bg_col;
-                    *p++ = (b & 0x08) ? fg_col : bg_col;
-                    *p++ = (b & 0x04) ? fg_col : bg_col;
-                    *p++ = (b & 0x02) ? fg_col : bg_col;
-                    *p++ = (b & 0x01) ? fg_col : bg_col;
+                    *q++ = *(vp + ((b >> 6) & 3));
+                    *q++ = *(vp + ((b >> 4) & 3));
+                    *q++ = *(vp + ((b >> 2) & 3));
+                    *q++ = *(vp + ((b >> 0) & 3));
                 }
             }
 
         }
         else
         {
-            // Attribue mode disabled
-            uint fg_col = colour_palette_vga80[vga80_ctrl1 & 7];
-            uint bg_col = colour_palette_vga80[vga80_ctrl2 & 7];
+            // Attribue mode disabled, use default colours in control registers
+            uint attr = ((vga80_ctrl1 & 7) << 4) | (vga80_ctrl2 & 7);
+            uint32_t *vp = vga80_lut + (attr << 2);
             for (int col = 0; col < 80; col++)
             {
                 uint ch = *char_addr++;
@@ -656,18 +665,14 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                 {
                     b = ~b;
                 }
-                *p++ = (b & 0x80) ? fg_col : bg_col;
-                *p++ = (b & 0x40) ? fg_col : bg_col;
-                *p++ = (b & 0x20) ? fg_col : bg_col;
-                *p++ = (b & 0x10) ? fg_col : bg_col;
-                *p++ = (b & 0x08) ? fg_col : bg_col;
-                *p++ = (b & 0x04) ? fg_col : bg_col;
-                *p++ = (b & 0x02) ? fg_col : bg_col;
-                *p++ = (b & 0x01) ? fg_col : bg_col;
+                *q++ = *(vp + ((b >> 6) & 3));
+                *q++ = *(vp + ((b >> 4) & 3));
+                *q++ = *(vp + ((b >> 2) & 3));
+                *q++ = *(vp + ((b >> 0) & 3));
             }
         }
     }
-    return p;
+    return p + 640;
 }
 
 void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
@@ -699,6 +704,7 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
 void core1_func()
 {
     // initialize video and interrupts on core 1
+    generate_vga80_lut();
     scanvideo_setup(&vga_mode);
     initialiseIO();
     scanvideo_timing_enable(true);

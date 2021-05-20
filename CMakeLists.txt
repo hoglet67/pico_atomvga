@@ -13,7 +13,7 @@ add_executable(atomvga
   )
 
 # Enable if the system clock is greater than 250MHz
-pico_set_binary_type(atomvga no_flash)
+#pico_set_binary_type(atomvga no_flash)
 
 pico_generate_pio_header(atomvga ${CMAKE_CURRENT_LIST_DIR}/atomvga.pio)
 
