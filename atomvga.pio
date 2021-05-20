@@ -30,7 +30,7 @@ loop:
     nop                     side ADDRESS_LOW
     wait 1 GPIO PIN_1MHZ                                ; wait for clock 0 -> 1
 
-    in PINS 8               side ADDRESS_HIGH           ; read address 0-7 
+    in PINS 8               side ADDRESS_HIGH           ; read address 0-7
     jmp PIN handle_read                                 ; wait for next clock cycle if not a write
     nop [1]
     nop
@@ -50,9 +50,9 @@ handle_read:
     in y 8
     wait 0 GPIO PIN_1MHZ                                ; wait for clock 1 -> 0
 
-    jmp loop                
+    jmp loop
 
- 
+
 .wrap
 
 
@@ -61,15 +61,17 @@ handle_read:
 
 void test_program_init(PIO pio, uint sm, uint offset) {
    pio_sm_config c = test_program_get_default_config(offset);
-   sm_config_set_jmp_pin 	(&c, test_PIN_R_NW);  	
+   sm_config_set_jmp_pin 	(&c, test_PIN_R_NW);
    sm_config_set_in_pins(&c, test_PIN_A0);
    sm_config_set_set_pins(&c, test_PIN_SEL1, 3);
 
    sm_config_set_sideset(&c, 4, true, false);
    sm_config_set_sideset_pins(&c, test_PIN_SEL1);
-   
+
    sm_config_set_in_shift(&c, true, true, 32);
    pio_sm_init(pio, sm, offset, &c);
+   // Quick hack to maintain the timings
+   pio_sm_set_clkdiv_int_frac(pio, sm, 2, 0);
 }
 
 %}

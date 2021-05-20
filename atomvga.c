@@ -18,6 +18,7 @@
 #include "pico/scanvideo/composable_scanline.h"
 #include "pico/sync.h"
 #include "hardware/irq.h"
+#include "hardware/vreg.h"
 #include "atomvga.h"
 
 // This base address of the 8255 PIA
@@ -26,8 +27,8 @@
 // The base address of the FRame Buffer
 #define FB_ADDR 0x8000
 
-#define vga_mode vga_mode_320x240_60
-// #define vga_mode vga_mode_640x480_60
+// #define vga_mode vga_mode_320x240_60
+#define vga_mode vga_mode_640x480_60
 
 const uint LED_PIN = 25;
 const uint SEL1_PIN = test_PIN_SEL1;
@@ -227,14 +228,14 @@ void __no_inline_not_in_flash_func(main_loop())
         if (reg & 0x1000000)
         {
             // read
-            if (address == 0xBDE0)
-            {
-                uint8_t b = memory[0xBDE0];
-                pio_sm_put(pio, 1, 0xFF | (b << 8));
-            }
-            else if (address == 0xBDEF)
+            if (address == 0xBDEF)
             {
                 uint8_t b = 0x12;
+                pio_sm_put(pio, 1, 0xFF | (b << 8));
+            }
+            else if ((address & 0xFFF0) == 0xBDE0)
+            {
+                uint8_t b = memory[address];
                 pio_sm_put(pio, 1, 0xFF | (b << 8));
             }
         }
@@ -249,9 +250,11 @@ void __no_inline_not_in_flash_func(main_loop())
 
 int main(void)
 {
-    uint base_freq = 50000;
-
-    set_sys_clock_khz(base_freq * 3, true);
+    uint sys_freq = 300000;
+    if (sys_freq > 250000) {
+        vreg_set_voltage(VREG_VOLTAGE_1_25);
+    }
+    set_sys_clock_khz(sys_freq, true);
     setup_default_uart();
 
     stdio_init_all();
@@ -319,11 +322,11 @@ const uint vdu_mem_start = FB_ADDR;
 const uint vdu_mem_end = FB_ADDR + 0x1800;
 const uint chars_per_row = 32;
 
-const uint vga_width = 320;
-const uint vga_height = 240;
+const uint vga_width = 640;
+const uint vga_height = 480;
 
-const uint max_width = 256;
-const uint max_height = 192;
+const uint max_width = 512;
+const uint max_height = 384;
 
 const uint vertical_offset = (vga_height - max_height) / 2;
 const uint horizontal_offset = (vga_width - max_width) / 2;
@@ -342,8 +345,8 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
 {
     // Screen is 16 rows x 32 columns
     // Each char is 12 x 8 pixels
-    uint row = relative_line_num / 12;
-    uint sub_row = relative_line_num % 12;
+    uint row = (relative_line_num / 2 ) / 12;
+    uint sub_row = (relative_line_num / 2 ) % 12;
 
     if (row >= 0 && row < 16)
     {
@@ -364,10 +367,10 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? colour : 0;
                 *p++ = COMPOSABLE_COLOR_RUN;
                 *p++ = pix1;
-                *p++ = 4 - 3;
+                *p++ = 8 - 3;
                 *p++ = COMPOSABLE_COLOR_RUN;
                 *p++ = pix0;
-                *p++ = 4 - 3;
+                *p++ = 8 - 3;
             }
             else
             {
@@ -392,9 +395,11 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 uint8_t mask = 0x80;
                 *p++ = COMPOSABLE_RAW_RUN;
                 *p++ = (b & mask) ? colour : 0;
-                *p++ = 8 - 3;
+                *p++ = 16 - 3;
+                *p++ = (b & mask) ? colour : 0;
                 for (mask = mask >> 1; mask > 0; mask = mask >> 1)
                 {
+                    *p++ = (b & mask) ? colour : 0;
                     *p++ = (b & mask) ? colour : 0;
                 }
             }
@@ -424,7 +429,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
     // Graphics modes have a coloured border, text modes have a black border
     uint16_t border_colour = (mode & 1) ? palette[0] : 0;
-    uint debug_end = debug ? debug_start + 12 : debug_start;
+    uint debug_end = debug ? debug_start + 24 : debug_start;
 
     if (relative_line_num < 0 || line_num >= debug_end)
     {
@@ -443,7 +448,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
         }
         else if (!(mode & 1))
         {
-            if (relative_line_num >= 0 && relative_line_num < (16 * 12))
+            if (relative_line_num >= 0 && relative_line_num < (16 * 24))
             {
                 p = do_text(buffer, relative_line_num, (char *)memory + vdu_mem_start, p);
             }
@@ -452,7 +457,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
         {
 
             const uint height = get_height(mode);
-            relative_line_num = relative_line_num * height / 192;
+            relative_line_num = (relative_line_num / 2) * height / 192;
             if (relative_line_num >= 0 && relative_line_num < height)
             {
 
@@ -461,7 +466,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
                 *p++ = COMPOSABLE_RAW_RUN;
                 *p++ = border_colour;
-                *p++ = 256 + 1 - 3;
+                *p++ = 512 + 1 - 3;
 
                 const uint pixel_count = get_width(mode);
                 if (is_colour(mode))
@@ -478,14 +483,21 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                         if (pixel_count == 256)
                         {
                             *p++ = colour;
+                            *p++ = colour;
                         }
                         else if (pixel_count == 128)
                         {
                             *p++ = colour;
                             *p++ = colour;
+                            *p++ = colour;
+                            *p++ = colour;
                         }
                         else if (pixel_count == 64)
                         {
+                            *p++ = colour;
+                            *p++ = colour;
+                            *p++ = colour;
+                            *p++ = colour;
                             *p++ = colour;
                             *p++ = colour;
                             *p++ = colour;
@@ -505,14 +517,21 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                             if (pixel_count == 256)
                             {
                                 *p++ = colour;
+                                *p++ = colour;
                             }
                             else if (pixel_count == 128)
                             {
                                 *p++ = colour;
                                 *p++ = colour;
+                                *p++ = colour;
+                                *p++ = colour;
                             }
                             else if (pixel_count == 64)
                             {
+                                *p++ = colour;
+                                *p++ = colour;
+                                *p++ = colour;
+                                *p++ = colour;
                                 *p++ = colour;
                                 *p++ = colour;
                                 *p++ = colour;
@@ -548,6 +567,135 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
     buffer->status = SCANLINE_OK;
 }
 
+
+uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, uint16_t *p)
+{
+    // Screen is 80 columns by 40 rows
+    // Each char is 12 x 8 pixels
+    uint row = relative_line_num / 12;
+    uint sub_row = relative_line_num % 12;
+
+    uint8_t *fd = fontdata + sub_row;
+
+    if (row >= 0 && row < 40)
+    {
+        volatile uint8_t *char_addr = memory + vdu_mem_start + 80 * row;
+
+        uint vga80_ctrl1 = memory[0xBDE4];
+        uint vga80_ctrl2 = memory[0xBDE5];
+
+        *p++ = COMPOSABLE_RAW_RUN;
+        *p++ = 0;
+        *p++ = 641 - 3;
+
+        if (vga80_ctrl1 & 0x08)
+        {
+            // Attribute mode enabled
+            volatile uint8_t *attr_addr = char_addr + 80 * 40;
+            uint shift = (sub_row >> 1) & 0x06; // 0, 2 or 4
+            uint smask0 = 0x10 >> shift;
+            uint smask1 = 0x20 >> shift;
+            uint ulmask = (sub_row == 10) ? 0xFF : 0x00;
+            for (int col = 0; col < 80; col++)
+            {
+                uint ch     = *char_addr++;
+                uint attr   = *attr_addr++;
+                uint fg_col = colour_palette_vga80[attr & 7];
+                uint bg_col = colour_palette_vga80[(attr >> 4) & 7];
+                if (attr & 0x80)
+                {
+                    // Semi Graphics
+                    uint16_t pix1 = (ch & smask1) ? fg_col : bg_col;
+                    uint16_t pix0 = (ch & smask0) ? fg_col : bg_col;
+                    *p++ = pix1;
+                    *p++ = pix1;
+                    *p++ = pix1;
+                    *p++ = pix1;
+                    *p++ = pix0;
+                    *p++ = pix0;
+                    *p++ = pix0;
+                    *p++ = pix0;
+                }
+                else
+                {
+                    // Text
+                    uint8_t b = fd[(ch & 0x7f) * 12];
+                    if (ch >= 0x80)
+                    {
+                        b = ~b;
+                    }
+#if 0
+                    // TODO: Underlined; currently this pushes it over the edge at 300MHz
+                    if (attr & 0x08)
+                    {
+                        b |= ulmask;
+                    }
+#endif
+                    *p++ = (b & 0x80) ? fg_col : bg_col;
+                    *p++ = (b & 0x40) ? fg_col : bg_col;
+                    *p++ = (b & 0x20) ? fg_col : bg_col;
+                    *p++ = (b & 0x10) ? fg_col : bg_col;
+                    *p++ = (b & 0x08) ? fg_col : bg_col;
+                    *p++ = (b & 0x04) ? fg_col : bg_col;
+                    *p++ = (b & 0x02) ? fg_col : bg_col;
+                    *p++ = (b & 0x01) ? fg_col : bg_col;
+                }
+            }
+
+        }
+        else
+        {
+            // Attribue mode disabled
+            uint fg_col = colour_palette_vga80[vga80_ctrl1 & 7];
+            uint bg_col = colour_palette_vga80[vga80_ctrl2 & 7];
+            for (int col = 0; col < 80; col++)
+            {
+                uint ch = *char_addr++;
+                uint8_t b = fd[(ch & 0x7f) * 12];
+                if (ch >= 0x80)
+                {
+                    b = ~b;
+                }
+                *p++ = (b & 0x80) ? fg_col : bg_col;
+                *p++ = (b & 0x40) ? fg_col : bg_col;
+                *p++ = (b & 0x20) ? fg_col : bg_col;
+                *p++ = (b & 0x10) ? fg_col : bg_col;
+                *p++ = (b & 0x08) ? fg_col : bg_col;
+                *p++ = (b & 0x04) ? fg_col : bg_col;
+                *p++ = (b & 0x02) ? fg_col : bg_col;
+                *p++ = (b & 0x01) ? fg_col : bg_col;
+            }
+        }
+    }
+    return p;
+}
+
+void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
+{
+    const uint line_num = scanvideo_scanline_number(buffer->scanline_id);
+
+    uint16_t *p = do_text_vga80(buffer, line_num, (uint16_t *)buffer->data);
+
+    // black pixel to end line
+    *p++ = COMPOSABLE_RAW_1P;
+    *p++ = 0;
+    // end of line with alignment padding
+    if (!(3u & (uintptr_t)p))
+    {
+        *p++ = COMPOSABLE_EOL_SKIP_ALIGN;
+    }
+    else
+    {
+        *p++ = COMPOSABLE_EOL_ALIGN;
+    }
+    *p++ = 0;
+
+    buffer->data_used = ((uint32_t *)p) - buffer->data;
+    assert(buffer->data_used < buffer->data_max);
+
+    buffer->status = SCANLINE_OK;
+}
+
 void core1_func()
 {
     // initialize video and interrupts on core 1
@@ -557,8 +705,16 @@ void core1_func()
     sem_release(&video_initted);
     while (true)
     {
+        uint vga80 = memory[0xBDE0] & 0x80;
         scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
-        draw_color_bar(scanline_buffer);
+        if (vga80)
+        {
+            draw_color_bar_vga80(scanline_buffer);
+        }
+        else
+        {
+            draw_color_bar(scanline_buffer);
+        }
         scanvideo_end_scanline_generation(scanline_buffer);
     }
 }

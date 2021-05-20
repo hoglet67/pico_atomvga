@@ -376,6 +376,17 @@ uint16_t colour_palette_atom[8] = {
     ORANGE,
 };
 
+uint16_t colour_palette_vga80[8] = {
+    BLACK,
+    BLUE,
+    GREEN,
+    CYAN,
+    RED,
+    MAGENTA,
+    YELLOW,
+    WHITE
+};
+
 uint16_t colour_palette_improved[4] = {
     BLACK,
     YELLOW,
