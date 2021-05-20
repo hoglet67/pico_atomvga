@@ -69,6 +69,8 @@ static void initialiseIO()
     gpio_set_dir(LED_PIN, GPIO_OUT);
 }
 
+void reset_vga80();
+
 void core1_func();
 
 static semaphore_t video_initted;
@@ -249,7 +251,7 @@ void __no_inline_not_in_flash_func(main_loop())
 
             // hack to reset the vga80x40 mode when BREAK is pressed
             if (address == 0xb003 && data == 0x8a) {
-               memory[0xBDE0] = 0;
+                reset_vga80();
             }
         }
     }
@@ -575,14 +577,24 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 }
 
 
-// Use an LUT to allow two pixels to be calculated at once, taking account of the attribute byte for colours
-//
-// Bit  8  7  6  5  4  3  2  1   0
-//      --bgc--  x  --fgc--  p1 p0
-//
-void generate_vga80_lut()
+void reset_vga80()
 {
-    for (int i = 0; i < 128 * 4; i++) {
+    memory[0xBDE0] = 0x00; // Normal text mode (vga80 off)
+    memory[0xBDE4] = 0xB2; // Foreground Green
+    memory[0xBDE5] = 0x00; // Background Black
+}
+
+void initialize_vga80()
+{
+    // Reset the VGA80 hardware
+    reset_vga80();
+    // Use an LUT to allow two pixels to be calculated at once, taking account of the attribute byte for colours
+    //
+    // Bit  8  7  6  5  4  3  2  1   0
+    //      --bgc--  x  --fgc--  p1 p0
+    //
+    for (int i = 0; i < 128 * 4; i++)
+    {
         vga80_lut[i] =  ((i & 1) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]) << 16;
         vga80_lut[i] |= ((i & 2) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]);
     }
@@ -599,24 +611,28 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
 
     if (row >= 0 && row < 40)
     {
+        // Compute the start address of the current row in the Atom framebuffer
         volatile uint8_t *char_addr = memory + vdu_mem_start + 80 * row;
 
+        // Read the VGA80 control registers
         uint vga80_ctrl1 = memory[0xBDE4];
         uint vga80_ctrl2 = memory[0xBDE5];
 
         *p++ = COMPOSABLE_RAW_RUN;
-        *p++ = 0;
-        *p++ = 642 - 3;
-        *p++ = 0;
+        *p++ = 0;       // Extra black pixel
+        *p++ = 642 - 3; //
+        *p++ = 0;       // Extra black pixel
 
         // For efficiency, compute two pixels at a time using a lookup table
+        // p is now on a word boundary due to the extra pixels above
         uint32_t *q = (uint32_t *)p;
 
         if (vga80_ctrl1 & 0x08)
         {
-            // Attribute mode enabled
+            // Attribute mode enabled, attributes follow the characters in the frame buffer
             volatile uint8_t *attr_addr = char_addr + 80 * 40;
             uint shift = (sub_row >> 1) & 0x06; // 0, 2 or 4
+            // Compute these outside of the for loop for efficiency
             uint smask0 = 0x10 >> shift;
             uint smask1 = 0x20 >> shift;
             uint ulmask = (sub_row == 10) ? 0xFF : 0x00;
@@ -628,9 +644,9 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                 if (attr & 0x80)
                 {
                     // Semi Graphics
-
                     uint32_t p1 = (ch & smask1) ? *(vp + 3) : *vp;
                     uint32_t p0 = (ch & smask0) ? *(vp + 3) : *vp;
+                    // Unroll the writing of the four pixel pairs
                     *q++ = p1;
                     *q++ = p1;
                     *q++ = p0;
@@ -649,6 +665,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                     {
                         b |= ulmask;
                     }
+                    // Unroll the writing of the four pixel pairs
                     *q++ = *(vp + ((b >> 6) & 3));
                     *q++ = *(vp + ((b >> 4) & 3));
                     *q++ = *(vp + ((b >> 2) & 3));
@@ -659,8 +676,10 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
         }
         else
         {
-            // Attribue mode disabled, use default colours in control registers
-            uint attr = ((vga80_ctrl1 & 7) << 4) | (vga80_ctrl2 & 7);
+            // Attribute mode disabled, use default colours from the VGA80 control registers:
+            //   bits 2..0 of VGA80_CTRL1 (#BDE4) are the default foreground colour
+            //   bits 2..0 of VGA80_CTRL2 (#BDE5) are the default background colour
+            uint attr = ((vga80_ctrl2 & 7) << 4) | (vga80_ctrl1 & 7);
             uint32_t *vp = vga80_lut + (attr << 2);
             for (int col = 0; col < 80; col++)
             {
@@ -670,6 +689,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                 {
                     b = ~b;
                 }
+                // Unroll the writing of the four pixel pairs
                 *q++ = *(vp + ((b >> 6) & 3));
                 *q++ = *(vp + ((b >> 4) & 3));
                 *q++ = *(vp + ((b >> 2) & 3));
@@ -677,6 +697,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
             }
         }
     }
+    // The above loops add 80 x 4 = 320 32-bit words, which is 640 16-bit words
     return p + 640;
 }
 
@@ -709,7 +730,7 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
 void core1_func()
 {
     // initialize video and interrupts on core 1
-    generate_vga80_lut();
+    initialize_vga80();
     scanvideo_setup(&vga_mode);
     initialiseIO();
     scanvideo_timing_enable(true);
