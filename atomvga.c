@@ -150,7 +150,7 @@ const uint debug_test_len = 32;
 
 char debug_text[32];
 
-volatile bool debug = false;
+bool debug = false;
 
 void set_debug_text(char *text)
 {
@@ -250,7 +250,8 @@ void __no_inline_not_in_flash_func(main_loop())
             memory[address] = data;
 
             // hack to reset the vga80x40 mode when BREAK is pressed
-            if (address == 0xb003 && data == 0x8a) {
+            if (address == 0xb003 && data == 0x8a)
+            {
                 reset_vga80();
             }
         }
@@ -260,7 +261,8 @@ void __no_inline_not_in_flash_func(main_loop())
 int main(void)
 {
     uint sys_freq = 200000;
-    if (sys_freq > 250000) {
+    if (sys_freq > 250000)
+    {
         vreg_set_voltage(VREG_VOLTAGE_1_25);
     }
     set_sys_clock_khz(sys_freq, true);
@@ -270,8 +272,14 @@ int main(void)
 
     for (uint i = FB_ADDR; i < FB_ADDR + 0x200; i++)
     {
-        memory[i] = rand();
+        memory[i] = 32;
     }
+
+    // Display message and build date/time
+    set_debug_text("ATOM PICO VGA ADAPTER");
+    memcpy((char *)(memory + 0x8140), debug_text, 32);
+    set_debug_text(__DATE__ " " __TIME__);
+    memcpy((char *)(memory + 0x8160), debug_text, 32);
 
     // create a semaphore to be posted when video init is complete
     sem_init(&video_initted, 0, 1);
@@ -354,8 +362,8 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
 {
     // Screen is 16 rows x 32 columns
     // Each char is 12 x 8 pixels
-    uint row = (relative_line_num / 2 ) / 12;
-    uint sub_row = (relative_line_num / 2 ) % 12;
+    uint row = (relative_line_num / 2) / 12;
+    uint sub_row = (relative_line_num / 2) % 12;
 
     if (row >= 0 && row < 16)
     {
@@ -369,11 +377,12 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 colour_index += 4;
             }
             uint16_t colour = text_palette[colour_index];
+            uint16_t back_colour = 0;
             if (ch >= 0x40 && ch <= 0x7F || ch >= 0xC0 && ch <= 0xFF)
             {
                 uint pix_row = 2 - (sub_row / 4);
-                uint16_t pix0 = ((ch >> (pix_row * 2)) & 0x1) ? colour : 0;
-                uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? colour : 0;
+                uint16_t pix0 = ((ch >> (pix_row * 2)) & 0x1) ? colour : back_colour;
+                uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? colour : back_colour;
                 *p++ = COMPOSABLE_COLOR_RUN;
                 *p++ = pix1;
                 *p++ = 8 - 3;
@@ -383,14 +392,6 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             }
             else
             {
-                // uint colour_index = (ch >> 6) & 0b11;
-                // if (alt_colour()) {
-                //     colour_index += 4;
-                // }
-                uint16_t colour = text_palette[colour_index];
-                if (alt_colour)
-                    colour_index += 4;
-
                 uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
 
                 if (support_lower && ch >= 0x80 && ch < 0xA0)
@@ -399,17 +400,36 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 }
                 else if (ch >= 0x80)
                 {
-                    b = ~b;
+                    back_colour = colour;
+                    colour = 0;
                 }
-                uint8_t mask = 0x80;
-                *p++ = COMPOSABLE_RAW_RUN;
-                *p++ = (b & mask) ? colour : 0;
-                *p++ = 16 - 3;
-                *p++ = (b & mask) ? colour : 0;
-                for (mask = mask >> 1; mask > 0; mask = mask >> 1)
+
+                if (b == 0)
                 {
-                    *p++ = (b & mask) ? colour : 0;
-                    *p++ = (b & mask) ? colour : 0;
+                    *p++ = COMPOSABLE_COLOR_RUN;
+                    *p++ = back_colour;
+                    *p++ = 16 - 3;
+                }
+                else if (b == 0xFF)
+                {
+                    *p++ = COMPOSABLE_COLOR_RUN;
+                    *p++ = colour;
+                    *p++ = 16 - 3;
+                }
+                else
+                {
+                    *p++ = COMPOSABLE_RAW_RUN;
+                    *p++ = back_colour;
+                    *p++ = 16 - 3;
+                    *p++ = back_colour;
+                    *p++ = back_colour;
+                    *p++ = back_colour;
+                    for (uint8_t mask = 0x20; mask > 0; mask = mask >> 1)
+                    {
+                        const uint16_t c = (b & mask) ? colour : back_colour;
+                        *p++ = c;
+                        *p++ = c;
+                    }
                 }
             }
         }
@@ -489,12 +509,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                         }
                         uint x = (word >> 30) & 0b11;
                         uint16_t colour = palette[x];
-                        if (pixel_count == 256)
-                        {
-                            *p++ = colour;
-                            *p++ = colour;
-                        }
-                        else if (pixel_count == 128)
+                        if (pixel_count == 128)
                         {
                             *p++ = colour;
                             *p++ = colour;
@@ -517,26 +532,51 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                 }
                 else
                 {
+                    uint16_t fg = palette[0];
                     for (uint i = 0; i < pixel_count / 32; i++)
                     {
-                        uint32_t b = __builtin_bswap32(*bp++);
-                        for (uint32_t mask = 0x80000000; mask > 0; mask = mask >> 1)
+                        const uint32_t b = __builtin_bswap32(*bp++);
+                        if (pixel_count == 256)
                         {
-                            uint16_t colour = (b & mask) ? palette[0] : 0;
-                            if (pixel_count == 256)
+                            for (uint32_t mask = 0x80000000; mask > 0;)
                             {
+                                uint16_t colour = (b & mask) ? fg : 0;
+                                *p++ = colour;
+                                *p++ = colour;
+                                mask = mask >> 1;
+
+                                colour = (b & mask) ? fg : 0;
+                                *p++ = colour;
+                                *p++ = colour;
+                                mask = mask >> 1;
+
+                                colour = (b & mask) ? fg : 0;
+                                *p++ = colour;
+                                *p++ = colour;
+                                mask = mask >> 1;
+
+                                colour = (b & mask) ? fg : 0;
+                                *p++ = colour;
+                                *p++ = colour;
+                                mask = mask >> 1;
+                            }
+                        }
+                        else if (pixel_count == 128)
+                        {
+                            for (uint32_t mask = 0x80000000; mask > 0; mask = mask >> 1)
+                            {
+                                uint16_t colour = (b & mask) ? palette[0] : 0;
+                                *p++ = colour;
+                                *p++ = colour;
                                 *p++ = colour;
                                 *p++ = colour;
                             }
-                            else if (pixel_count == 128)
+                        }
+                        else if (pixel_count == 64)
+                        {
+                            for (uint32_t mask = 0x80000000; mask > 0; mask = mask >> 1)
                             {
-                                *p++ = colour;
-                                *p++ = colour;
-                                *p++ = colour;
-                                *p++ = colour;
-                            }
-                            else if (pixel_count == 64)
-                            {
+                                uint16_t colour = (b & mask) ? palette[0] : 0;
                                 *p++ = colour;
                                 *p++ = colour;
                                 *p++ = colour;
@@ -576,7 +616,6 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
     buffer->status = SCANLINE_OK;
 }
 
-
 void reset_vga80()
 {
     memory[0xBDE0] = 0x00; // Normal text mode (vga80 off)
@@ -595,7 +634,7 @@ void initialize_vga80()
     //
     for (int i = 0; i < 128 * 4; i++)
     {
-        vga80_lut[i] =  ((i & 1) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]) << 16;
+        vga80_lut[i] = ((i & 1) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]) << 16;
         vga80_lut[i] |= ((i & 2) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]);
     }
 }
@@ -638,8 +677,8 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
             uint ulmask = (sub_row == 10) ? 0xFF : 0x00;
             for (int col = 0; col < 80; col++)
             {
-                uint ch     = *char_addr++;
-                uint attr   = *attr_addr++;
+                uint ch = *char_addr++;
+                uint attr = *attr_addr++;
                 uint32_t *vp = vga80_lut + ((attr & 0x77) << 2);
                 if (attr & 0x80)
                 {
@@ -672,7 +711,6 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                     *q++ = *(vp + ((b >> 0) & 3));
                 }
             }
-
         }
         else
         {
