@@ -410,26 +410,23 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                     *p++ = back_colour;
                     *p++ = 16 - 3;
                 }
-                else if (b == 0xFF)
-                {
-                    *p++ = COMPOSABLE_COLOR_RUN;
-                    *p++ = colour;
-                    *p++ = 16 - 3;
-                }
                 else
                 {
+                    // bits 0,6 and 7 are always 0
                     *p++ = COMPOSABLE_RAW_RUN;
-                    *p++ = back_colour;
+                    *p++ = back_colour;     // bit 7
                     *p++ = 16 - 3;
+                    *p++ = back_colour;     
+                    *p++ = back_colour;     // bit 6
                     *p++ = back_colour;
-                    *p++ = back_colour;
-                    *p++ = back_colour;
-                    for (uint8_t mask = 0x20; mask > 0; mask = mask >> 1)
+                    for (uint8_t mask = 0x20; mask > 1; mask = mask >> 1)
                     {
                         const uint16_t c = (b & mask) ? colour : back_colour;
                         *p++ = c;
                         *p++ = c;
                     }
+                    *p++ = back_colour;     // bit 0
+                    *p++ = back_colour;
                 }
             }
         }
