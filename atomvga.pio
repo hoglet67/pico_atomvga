@@ -17,44 +17,34 @@
 
 //.define tSELECT 3   ; = 20nS at 150MHz
 .side_set 3 opt
-    set y 1
-    set PINDIRS, 0b111      side ADDRESS_LOW            ; set as output
-
-
-;retry:
-;    mov ISR, x              side ADDRESS_LOW            ; clear ISR
-;    wait 0 GPIO PIN_1MHZ                                ; wait for clock -> 0
+    wait 1 GPIO PIN_1MHZ                                ; ensure SM starts at beginning of a bus cycle
 
 loop:
-.wrap_target
-    nop                     side ADDRESS_LOW
-    wait 1 GPIO PIN_1MHZ                                ; wait for clock 0 -> 1
+    wait 1 GPIO PIN_1MHZ    side ADDRESS_LOW            ; wait for clock 0 -> 1
 
-    in PINS 8               side ADDRESS_HIGH           ; read address 0-7
-    jmp PIN handle_read                                 ; wait for next clock cycle if not a write
+    in PINS 8                                           ; read address 0-7
+    jmp PIN handle_read     side ADDRESS_HIGH           ; test for read and select address 8-15
+    nop [1]                                             ; delay until 74lvc245 is ready
     nop [1]
-    nop
-    in PINS 8               side DATA                   ; read address 8-15
+    nop [1]
+    in PINS 8                                           ; read address 8-15
 
-    wait 0 GPIO PIN_1MHZ                                ; wait for clock 1 -> 0
-    in PINS 8               side ADDRESS_LOW            ; read data
-    in x 8
+    wait 0 GPIO PIN_1MHZ    side DATA                   ; wait for clock 1 -> 0
+    in PINS 8                                           ; read data
+    in NULL 8                                           ; 0 indicates 6502 write
     jmp loop
 
 handle_read:
+    nop [1]                                             ; delay until 74lvc245 is ready
     nop [1]
-    nop
+    set y 1 [1]
     in PINS 8                                           ; read address 8-15
 
-    in y 8
-    in y 8
+    in NULL 8                                           ; pad with 0's
+    in y 8                                              ; 1 indicates 6502 read
     wait 0 GPIO PIN_1MHZ                                ; wait for clock 1 -> 0
 
     jmp loop
-
-
-.wrap
-
 
 % c-sdk {
 // this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
@@ -69,9 +59,8 @@ void test_program_init(PIO pio, uint sm, uint offset) {
    sm_config_set_sideset_pins(&c, test_PIN_SEL1);
 
    sm_config_set_in_shift(&c, true, true, 32);
+   pio_sm_set_consecutive_pindirs (pio, sm, test_PIN_SEL1, 3, true);
    pio_sm_init(pio, sm, offset, &c);
-   // Quick hack to maintain the timings
-   pio_sm_set_clkdiv_int_frac(pio, sm, 2, 0);
 }
 
 %}

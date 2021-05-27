@@ -18,11 +18,11 @@
 .side_set 3 opt
 
 .wrap_target
-    pull block
-    out PINDIRS 8           side DATA
-    out PINS 8 [1]          side DATA
+    pull block                                          ; wait for CPU to send data
+    out PINDIRS 8           side DATA                   ; first byte = 0xFF
+    out PINS 8                                          ; second byte = the data
     wait 0 GPIO PIN_1MHZ                                ; wait for clock 0
-    out PINDIRS 8           side ADDRESS_LOW
+    out PINDIRS 8           side ADDRESS_LOW            ; third byte - 0x00
 .wrap
 
 
@@ -39,8 +39,6 @@ void atomvga_out_program_init(PIO pio, uint sm, uint offset) {
    sm_config_set_sideset_pins(&c, atomvga_out_PIN_SEL1);
 
    pio_sm_init(pio, sm, offset, &c);
-   // Quick hack to maintain the timings
-   pio_sm_set_clkdiv_int_frac(pio, sm, 2, 0);
 }
 
 %}
