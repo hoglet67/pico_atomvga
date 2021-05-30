@@ -20,12 +20,10 @@
 #include "hardware/irq.h"
 #include "hardware/vreg.h"
 #include "atomvga.h"
+#include "platform.h"
 
-// This base address of the 8255 PIA
-#define PIA_ADDR 0xB000
+// PIA and frambuffer address moved into platform.h -- PHS
 
-// The base address of the FRame Buffer
-#define FB_ADDR 0x8000
 
 // #define vga_mode vga_mode_320x240_60
 #define vga_mode vga_mode_640x480_60
@@ -47,7 +45,7 @@ static void initialiseIO()
     gpio_set_function(0, GPIO_FUNC_UART);
     gpio_set_function(1, GPIO_FUNC_UART);
 
-    // pins 2 to 9 are used to read the 6502 bus - 8 bits at a time
+    // pins 2 to 9 are used to read the 6502 / 6809 bus - 8 bits at a time
     for (uint pin = 2; pin <= 9; pin++)
     {
         gpio_init(pin);
@@ -82,14 +80,25 @@ volatile uint8_t memory[0x10000];
 
 #define CSI "\x1b["
 
+// Returns video mode as far as VDG is concerned, with the bits :
+//  b3  b2  b1  b0
+//  GM2 GM1 GM0 A/G  
 int get_mode()
 {
+#if (PLATFORM == PLATFORM_ATOM)    
     return (memory[PIA_ADDR] & 0xf0) >> 4;
+#elif (PLATFORM == PLATFORM_DRAGON)
+    return ((memory[PIA_ADDR] & 0x80) >> 7) | ((memory[PIA_ADDR] & 0x70) >> 3);
+#endif
 }
 
 bool alt_colour()
 {
+#if (PLATFORM == PLATFORM_ATOM)    
     return !!(memory[PIA_ADDR + 2] & 0x8);
+#elif (PLATFORM == PLATFORM_DRAGON)
+    return (memory[PIA_ADDR] & 0x08);
+#endif
 }
 
 void pscreen()
@@ -103,7 +112,7 @@ void pscreen()
         printf("|");
         for (int col = 0; col < 32; col++)
         {
-            unsigned char c = memory[row * 32 + col + FB_ADDR];
+            unsigned char c = memory[row * 32 + col + GetVidMemBase()];
             if (c < 0x80)
             {
                 c = c ^ 0x60;
@@ -128,7 +137,7 @@ static void irq_handler()
         u_int16_t address = reg & 0xFFFF;
         if (reg & 0x1000000)
         {
-            if (address = 0xBDE0)
+            if (address = COL80_BASE)
             {
                 pio_sm_put(pio, 1, count++);
             }
@@ -137,7 +146,7 @@ static void irq_handler()
         {
             u_int8_t data = (reg & 0xFF0000) >> 16;
             memory[address] = data;
-            if (address >= FB_ADDR && address < FB_ADDR + 0x200 || address == PIA_ADDR)
+            if (address >= GetVidMemBase() && address < GetVidMemBase() + 0x200 || address == PIA_ADDR)
             {
                 updated = true;
                 gpio_put(LED_PIN, 1);
@@ -155,18 +164,28 @@ bool debug = false;
 void set_debug_text(char *text)
 {
     strncpy(debug_text, text, debug_test_len);
+    
     for (int i = strnlen(text, debug_test_len); i < debug_test_len; i++)
     {
         debug_text[i] = ' ';
     }
+    
     for (int i = 0; i < debug_test_len; i++)
     {
         unsigned char c = debug_text[i];
+
+#if (PLATFORM == PLATFORM_ATOM)                
         c = c + 0x20;
         if (c < 0x80)
         {
             c = c ^ 0x60;
         }
+#else
+        if((c >= 0x20) && (c <= 0x3F))
+            c=c+0x40;
+        else if ((c >= 0x60) && (c <= 0x7F))
+            c=c-0x60;
+#endif        
         debug_text[i] = c;
     }
 }
@@ -181,7 +200,7 @@ void update_debug_text()
         uint bytes = bytes_per_row(mode) * get_height(mode);
 
         uint m = (mode + 1) / 2;
-
+#if (PLATFORM == PLATFORM_ATOM)
         sprintf(buffer, "mode %x/%d %dx%d %s %d",
                 mode,
                 m,
@@ -189,7 +208,16 @@ void update_debug_text()
                 get_height(mode),
                 is_colour(mode) ? "col" : "b&w",
                 bytes);
-
+#elif (PLATFORM == PLATFORM_DRAGON)
+        sprintf(buffer, "mode %x/%d %dx%d %s %d %04X",
+                mode,
+                m,
+                get_width(mode),
+                get_height(mode),
+                is_colour(mode) ? "col" : "b&w",
+                bytes,
+                SAMBits);
+#endif
         set_debug_text(buffer);
     }
     else
@@ -232,12 +260,12 @@ void __no_inline_not_in_flash_func(main_loop())
         if (reg & 0x1000000)
         {
             // read
-            if (address == 0xBDEF)
+            if (address == COL80_BASE)
             {
                 uint8_t b = 0x12;
                 pio_sm_put(pio, 1, 0xFF | (b << 8));
             }
-            else if ((address & 0xFFF0) == 0xBDE0)
+            else if ((address & 0xFFF0) == COL80_BASE)
             {
                 uint8_t b = memory[address];
                 pio_sm_put(pio, 1, 0xFF | (b << 8));
@@ -248,12 +276,26 @@ void __no_inline_not_in_flash_func(main_loop())
             // write
             u_int8_t data = (reg & 0xFF0000) >> 16;
             memory[address] = data;
+#if (PLATFORM == PLATFORM_DRAGON)
+            // Update SAM bits when written to
+            if ((address >= SAM_BASE) && (address <= SAM_END))
+            {
+                uint8_t     sam_data = GetSAMData(address);
+                uint16_t    sam_mask = GetSAMDataMask(address);
 
+                if (sam_data)
+                    SAMBits |= sam_mask;
+                else
+                    SAMBits &= ~sam_mask;
+            }
+#endif
+#if (PLATFORM == PLATFORM_ATOM)
             // hack to reset the vga80x40 mode when BREAK is pressed
             if (address == 0xb003 && data == 0x8a)
             {
                 reset_vga80();
             }
+#endif
         }
     }
 }
@@ -270,16 +312,21 @@ int main(void)
 
     stdio_init_all();
 
-    for (uint i = FB_ADDR; i < FB_ADDR + 0x200; i++)
+    for (uint i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
     {
         memory[i] = 32;
     }
 
+    char mess[32];
+
     // Display message and build date/time
-    set_debug_text("ATOM PICO VGA ADAPTER");
-    memcpy((char *)(memory + 0x8140), debug_text, 32);
+    set_debug_text(DEBUG_MESS);
+    memcpy((char *)(memory + GetVidMemBase() + 0x0140), debug_text, 32);
     set_debug_text(__DATE__ " " __TIME__);
-    memcpy((char *)(memory + 0x8160), debug_text, 32);
+    memcpy((char *)(memory + GetVidMemBase() + 0x0160), debug_text, 32);
+    snprintf(mess,32,"BASE=%04X, PIA=%04X, ",GetVidMemBase(),PIA_ADDR);
+    set_debug_text(mess);
+    memcpy((char *)(memory + GetVidMemBase()+0x180), debug_text, 32);
 
     // create a semaphore to be posted when video init is complete
     sem_init(&video_initted, 0, 1);
@@ -303,6 +350,7 @@ int main(void)
     main_loop();
 }
 
+#if (PLATFORM == PLATFORM_ATOM)
 void check_command()
 {
     if (is_command("DEBUG"))
@@ -334,9 +382,43 @@ void check_command()
         fontdata = fontdata_gime;
     }
 }
+#elif (PLATFORM == PLATFORM_DRAGON)
+void check_command()
+{
+    uint8_t command = memory[DRAGON_CMD_ADDR];
 
-const uint vdu_mem_start = FB_ADDR;
-const uint vdu_mem_end = FB_ADDR + 0x1800;
+    if (DRAGON_CMD_DEBUG == command)
+    {
+        debug = true;
+    }
+    else if (DRAGON_CMD_NODEBUG == command)
+    {
+        debug = false;
+    }
+    else if (DRAGON_CMD_LOWER == command)
+    {
+        support_lower = true;
+    }
+    else if (DRAGON_CMD_NOLOWER == command)
+    {
+        support_lower = false;
+    }
+    else if (DRAGON_CMD_CHAR0 == command)
+    {
+        fontdata = fontdata_6847;
+    }
+    else if (DRAGON_CMD_CHAR1 == command)
+    {
+        fontdata = fontdata_6847t1;
+    }
+    else if (DRAGON_CMD_CHAR2 == command)
+    {
+        fontdata = fontdata_gime;
+    }
+    memory[DRAGON_CMD_ADDR] = DRAGON_CMD_NONE;
+}
+#endif
+
 const uint chars_per_row = 32;
 
 const uint vga_width = 640;
@@ -358,47 +440,99 @@ uint16_t *add_border(uint16_t *p, uint16_t border_colour, uint16_t len)
     return p;
 }
 
-uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, char *memory, uint16_t *p)
+// Process Text mode, Semigraphics modes.
+//
+// 6847 control Atom    Dragon 
+// INV          D7      D6
+// !A/G         PA4     PB7
+// !A/S         D6      D7
+// CSS          PC3     PB3
+// !INT/EXT     D6      PB4
+// GM0          PA5     PB4
+// GM1          PA6     PB5
+// GM2          PA7     PB6
+//
+// Due to the interaction between the SAM and the VDG on the Dragon, there are 3 
+// extra semigraphics modes, SG8, SG12 and SG24, that split the character space up 
+// into 8, 12 and 24 pixels. These pixels are still half a character width but are
+// 3, 2 and 1 scanlines high respectively.
+// This happens by programming the VDG in text mode and the SAM in graphics mode.
+// The memory used for these modes is incresed so that each vertical part of the 
+// character space is 32 bytes apart in memory.
+// For example in the SG8 mode, the top 2 pixels are encoded in the first byte
+// the next 2 in the second byte and so on.
+// In this way the bytes per character line are 128, 192, and 384.
+//
+// Mode     Bytes/line  Bytes/chars colours resolution  memory
+// SG4      32          1           8       64x32       512
+// SG6      32          1           4       64x48       512
+// SG8      128         4           8       64x64       2048
+// SG12     192         6           8       64x96       3072
+// SG24     384         12          8       64x192      6144
+//
+// In SG8, SG12, SG24, the byte format is the same as the byte format for SG4
+// However if ralative_line_no is < 6 pixels 2 and 3 are plotted. If it is > 6
+// pixels 0 and 1 are plotted.
+//
+
+uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, char *memory, uint16_t *p, bool is_debug)
 {
     // Screen is 16 rows x 32 columns
     // Each char is 12 x 8 pixels
-    uint row = (relative_line_num / 2) / 12;
-    uint sub_row = (relative_line_num / 2) % 12;
+    // Note we divide ralative_line_number by 2 as we are double scanning each 6847 line to
+    // 2 VGA lines.  
+    uint row = (relative_line_num / 2) / 12;            // char row
+    uint sub_row = (relative_line_num / 2) % 12;        // scanline within current char row     
+    uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();    // index into semigraphics table
+    uint rows_per_char  = 12 / sg_bytes_row[sgidx];     // bytes per character space vertically
 
     if (row >= 0 && row < 16)
     {
-        uint vdu_address = chars_per_row * row;
+        // Calc start address for this row
+        uint vdu_address = ((chars_per_row * sg_bytes_row[sgidx]) * row) + (chars_per_row * (sub_row / rows_per_char));
+
         for (int col = 0; col < 32; col++)
         {
+            // Get character data from RAM and extract inv,ag,int/ext
             uint ch = memory[vdu_address + col];
-            uint colour_index = (ch >> 6) & 0b11;
+            bool inv    = (ch & INV_MASK) ? true : false;
+            bool as     = (ch & AS_MASK) ? true : false;
+            bool intext = GetIntExt(ch);
+            
+            if (as && intext)
+                sgidx = SG6_INDEX;           // SG6
+
+            uint colour_index;
+
+            if (SG6_INDEX == sgidx)
+                colour_index = (ch & SG6_COL_MASK) >> SG6_COL_SHIFT;
+            else
+                colour_index = (ch & SG4_COL_MASK) >> SG4_COL_SHIFT;
+
             if (alt_colour())
             {
-                colour_index += 4;
+                if (SG6_INDEX == sgidx)
+                    colour_index += 4;
             }
-            uint16_t colour = text_palette[colour_index];
+
+            uint16_t colour = colour_palette_atom[colour_index];
             uint16_t back_colour = 0;
-            if (ch >= 0x40 && ch <= 0x7F || ch >= 0xC0 && ch <= 0xFF)
-            {
-                uint pix_row = 2 - (sub_row / 4);
-                uint16_t pix0 = ((ch >> (pix_row * 2)) & 0x1) ? colour : back_colour;
-                uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? colour : back_colour;
-                *p++ = COMPOSABLE_COLOR_RUN;
-                *p++ = pix1;
-                *p++ = 8 - 3;
-                *p++ = COMPOSABLE_COLOR_RUN;
-                *p++ = pix0;
-                *p++ = 8 - 3;
-            }
-            else
+
+            // Deal with text mode first as we can decide this purely on the setting of the 
+            // alpha/semi bit.
+            if(!as)
             {
                 uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
 
-                if (support_lower && ch >= 0x80 && ch < 0xA0)
+                if (alt_colour())
+                    colour = ORANGE;
+                else
+                    colour = GREEN;
+                if (support_lower && ch >= LOWER_START && ch < LOWER_END)
                 {
                     b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
                 }
-                else if (ch >= 0x80)
+                else if (inv)
                 {
                     back_colour = colour;
                     colour = 0;
@@ -428,6 +562,19 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                     *p++ = back_colour;     // bit 0
                     *p++ = back_colour;
                 }
+            }
+            else        // Semigraphics
+            {
+                uint pix_row = (SG6_INDEX == sgidx) ? 2 - (sub_row / 4) : 1 - (sub_row / 6);
+                
+                uint16_t pix0 = ((ch >> (pix_row * 2)) & 0x1) ? colour : back_colour;
+                uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? colour : back_colour;
+                *p++ = COMPOSABLE_COLOR_RUN;
+                *p++ = pix1;
+                *p++ = 8 - 3;
+                *p++ = COMPOSABLE_COLOR_RUN;
+                *p++ = pix0;
+                *p++ = 8 - 3;
             }
         }
     }
@@ -470,13 +617,13 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
         if (line_num >= debug_start && line_num < debug_end)
         {
-            p = do_text(buffer, line_num - debug_start, debug_text, p);
+            p = do_text(buffer, line_num - debug_start, debug_text, p, true);
         }
         else if (!(mode & 1))
         {
             if (relative_line_num >= 0 && relative_line_num < (16 * 24))
             {
-                p = do_text(buffer, relative_line_num, (char *)memory + vdu_mem_start, p);
+                p = do_text(buffer, relative_line_num, (char *)memory + GetVidMemBase(), p, false);
             }
         }
         else
@@ -487,7 +634,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
             if (relative_line_num >= 0 && relative_line_num < height)
             {
 
-                uint vdu_address = vdu_mem_start + bytes_per_row(mode) * relative_line_num;
+                uint vdu_address = GetVidMemBase() + bytes_per_row(mode) * relative_line_num;
                 uint32_t *bp = (uint32_t *)memory + vdu_address / 4;
 
                 *p++ = COMPOSABLE_RAW_RUN;
@@ -615,9 +762,9 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
 void reset_vga80()
 {
-    memory[0xBDE0] = 0x00; // Normal text mode (vga80 off)
-    memory[0xBDE4] = 0xB2; // Foreground Green
-    memory[0xBDE5] = 0x00; // Background Black
+    memory[COL80_BASE] = 0x00;  // Normal text mode (vga80 off)
+    memory[COL80_FG] = 0xB2;    // Foreground Green
+    memory[COL80_BG] = 0x00;    // Background Black
 }
 
 void initialize_vga80()
@@ -648,11 +795,11 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
     if (row >= 0 && row < 40)
     {
         // Compute the start address of the current row in the Atom framebuffer
-        volatile uint8_t *char_addr = memory + vdu_mem_start + 80 * row;
+        volatile uint8_t *char_addr = memory + GetVidMemBase() + 80 * row;
 
         // Read the VGA80 control registers
-        uint vga80_ctrl1 = memory[0xBDE4];
-        uint vga80_ctrl2 = memory[0xBDE5];
+        uint vga80_ctrl1 = memory[COL80_FG];
+        uint vga80_ctrl2 = memory[COL80_BG];
 
         *p++ = COMPOSABLE_RAW_RUN;
         *p++ = 0;       // Extra black pixel
@@ -772,7 +919,7 @@ void core1_func()
     sem_release(&video_initted);
     while (true)
     {
-        uint vga80 = memory[0xBDE0] & 0x80;
+        uint vga80 = memory[COL80_BASE] & 0x80;
         scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
         if (vga80)
         {

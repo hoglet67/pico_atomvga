@@ -394,6 +394,28 @@ uint16_t colour_palette_improved[4] = {
     MAGENTA,
 };
 
+// Masks to extract pixel colours from SG4 and SG6 bytes
+#define SG4_COL_MASK    0x70
+#define SG6_COL_MASK    0xC0
+
+#define SG4_COL_SHIFT   4
+#define SG6_COL_SHIFT   6
+
+// Masks to extact bit paterns from SG4 and SG6
+#define SG4_PAT_MASK    0x0F
+#define SG6_PAT_MASK    0x3F
+
+// Bytes / char array for text / semigraphics modes
+// SG mode                     4  8  12 24  6          
+const uint sg_bytes_row[5]  = {1, 4, 6, 12, 1};
+
+#define TEXT_INDEX  0
+#define SG4_INDEX   0
+#define SG8_INDEX   1
+#define SG12_INDEX  2
+#define SG24_INDEX  3
+#define SG6_INDEX   4
+
 uint16_t *colour_palette = colour_palette_atom;
 
 inline bool is_colour(uint mode)
