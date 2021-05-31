@@ -82,10 +82,10 @@ volatile uint8_t memory[0x10000];
 
 // Returns video mode as far as VDG is concerned, with the bits :
 //  b3  b2  b1  b0
-//  GM2 GM1 GM0 A/G  
+//  GM2 GM1 GM0 A/G
 int get_mode()
 {
-#if (PLATFORM == PLATFORM_ATOM)    
+#if (PLATFORM == PLATFORM_ATOM)
     return (memory[PIA_ADDR] & 0xf0) >> 4;
 #elif (PLATFORM == PLATFORM_DRAGON)
     return ((memory[PIA_ADDR] & 0x80) >> 7) | ((memory[PIA_ADDR] & 0x70) >> 3);
@@ -94,7 +94,7 @@ int get_mode()
 
 bool alt_colour()
 {
-#if (PLATFORM == PLATFORM_ATOM)    
+#if (PLATFORM == PLATFORM_ATOM)
     return !!(memory[PIA_ADDR + 2] & 0x8);
 #elif (PLATFORM == PLATFORM_DRAGON)
     return (memory[PIA_ADDR] & 0x08);
@@ -164,17 +164,17 @@ bool debug = false;
 void set_debug_text(char *text)
 {
     strncpy(debug_text, text, debug_test_len);
-    
+
     for (int i = strnlen(text, debug_test_len); i < debug_test_len; i++)
     {
         debug_text[i] = ' ';
     }
-    
+
     for (int i = 0; i < debug_test_len; i++)
     {
         unsigned char c = debug_text[i];
 
-#if (PLATFORM == PLATFORM_ATOM)                
+#if (PLATFORM == PLATFORM_ATOM)
         c = c + 0x20;
         if (c < 0x80)
         {
@@ -185,7 +185,7 @@ void set_debug_text(char *text)
             c=c+0x40;
         else if ((c >= 0x60) && (c <= 0x7F))
             c=c-0x60;
-#endif        
+#endif
         debug_text[i] = c;
     }
 }
@@ -442,7 +442,7 @@ uint16_t *add_border(uint16_t *p, uint16_t border_colour, uint16_t len)
 
 // Process Text mode, Semigraphics modes.
 //
-// 6847 control Atom    Dragon 
+// 6847 control Atom    Dragon
 // INV          D7      D6
 // !A/G         PA4     PB7
 // !A/S         D6      D7
@@ -452,12 +452,12 @@ uint16_t *add_border(uint16_t *p, uint16_t border_colour, uint16_t len)
 // GM1          PA6     PB5
 // GM2          PA7     PB6
 //
-// Due to the interaction between the SAM and the VDG on the Dragon, there are 3 
-// extra semigraphics modes, SG8, SG12 and SG24, that split the character space up 
+// Due to the interaction between the SAM and the VDG on the Dragon, there are 3
+// extra semigraphics modes, SG8, SG12 and SG24, that split the character space up
 // into 8, 12 and 24 pixels. These pixels are still half a character width but are
 // 3, 2 and 1 scanlines high respectively.
 // This happens by programming the VDG in text mode and the SAM in graphics mode.
-// The memory used for these modes is incresed so that each vertical part of the 
+// The memory used for these modes is incresed so that each vertical part of the
 // character space is 32 bytes apart in memory.
 // For example in the SG8 mode, the top 2 pixels are encoded in the first byte
 // the next 2 in the second byte and so on.
@@ -480,9 +480,9 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
     // Screen is 16 rows x 32 columns
     // Each char is 12 x 8 pixels
     // Note we divide ralative_line_number by 2 as we are double scanning each 6847 line to
-    // 2 VGA lines.  
+    // 2 VGA lines.
     uint row = (relative_line_num / 2) / 12;            // char row
-    uint sub_row = (relative_line_num / 2) % 12;        // scanline within current char row     
+    uint sub_row = (relative_line_num / 2) % 12;        // scanline within current char row
     uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();    // index into semigraphics table
     uint rows_per_char  = 12 / sg_bytes_row[sgidx];     // bytes per character space vertically
 
@@ -498,7 +498,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             bool inv    = (ch & INV_MASK) ? true : false;
             bool as     = (ch & AS_MASK) ? true : false;
             bool intext = GetIntExt(ch);
-            
+
             if (as && intext)
                 sgidx = SG6_INDEX;           // SG6
 
@@ -518,7 +518,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             uint16_t colour = colour_palette_atom[colour_index];
             uint16_t back_colour = 0;
 
-            // Deal with text mode first as we can decide this purely on the setting of the 
+            // Deal with text mode first as we can decide this purely on the setting of the
             // alpha/semi bit.
             if(!as)
             {
@@ -550,7 +550,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                     *p++ = COMPOSABLE_RAW_RUN;
                     *p++ = back_colour;     // bit 7
                     *p++ = 16 - 3;
-                    *p++ = back_colour;     
+                    *p++ = back_colour;
                     *p++ = back_colour;     // bit 6
                     *p++ = back_colour;
                     for (uint8_t mask = 0x20; mask > 1; mask = mask >> 1)
@@ -566,7 +566,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             else        // Semigraphics
             {
                 uint pix_row = (SG6_INDEX == sgidx) ? 2 - (sub_row / 4) : 1 - (sub_row / 6);
-                
+
                 uint16_t pix0 = ((ch >> (pix_row * 2)) & 0x1) ? colour : back_colour;
                 uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? colour : back_colour;
                 *p++ = COMPOSABLE_COLOR_RUN;

@@ -1,4 +1,3 @@
-
 #ifndef TEST_PATTERN_H_
 #define TEST_PATTERN_H_
 
@@ -406,7 +405,7 @@ uint16_t colour_palette_improved[4] = {
 #define SG6_PAT_MASK    0x3F
 
 // Bytes / char array for text / semigraphics modes
-// SG mode                     4  8  12 24  6          
+// SG mode                     4  8  12 24  6
 const uint sg_bytes_row[5]  = {1, 4, 6, 12, 1};
 
 #define TEXT_INDEX  0

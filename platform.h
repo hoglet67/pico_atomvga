@@ -1,4 +1,4 @@
-/* 
+/*
   platform.h Defines dependent on target platform.
 */
 
@@ -42,7 +42,7 @@
 #define GetIntExt(ch)   (ch & INTEXT_MASK) ? true : false
 
 // Always 0 on Atom
-#define GetSAMSG()      0 
+#define GetSAMSG()      0
 
 #define LOWER_START 0x80
 #define LOWER_END   0xA0
