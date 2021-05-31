@@ -263,7 +263,7 @@ void __no_inline_not_in_flash_func(main_loop())
         if (reg & 0x1000000)
         {
             // read
-            if (address == COL80_BASE)
+            if (address == COL80_STAT)
             {
                 uint8_t b = 0x12;
                 pio_sm_put(pio, 1, 0xFF | (b << 8));
