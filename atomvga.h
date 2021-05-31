@@ -1,5 +1,5 @@
-#ifndef TEST_PATTERN_H_
-#define TEST_PATTERN_H_
+#ifndef ATOMVGA_H_
+#define ATOMVGA_H_
 
 // Characters 0..63 matches the original 6847 with high confidence.
 //
@@ -444,4 +444,4 @@ uint bytes_per_row(uint mode)
     return is_colour(mode) ? get_width(mode) * 2 / 8 : get_width(mode) / 8;
 };
 
-#endif /* TEST_PATTERN_H_ */
+#endif /* ATOMVGA_H_ */
