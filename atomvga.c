@@ -128,6 +128,8 @@ void pscreen()
     printf("MODE %x \n", get_mode());
 }
 
+#if 0
+// The IRQ handler is no longer used
 static void irq_handler()
 {
     static int count = 0;
@@ -154,6 +156,7 @@ static void irq_handler()
         }
     }
 }
+#endif
 
 const uint debug_test_len = 32;
 
