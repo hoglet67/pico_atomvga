@@ -72,7 +72,6 @@ void reset_vga80();
 void core1_func();
 
 static semaphore_t video_initted;
-static bool invert;
 
 bool updated;
 
@@ -139,7 +138,7 @@ static void irq_handler()
         u_int16_t address = reg & 0xFFFF;
         if (reg & 0x1000000)
         {
-            if (address = COL80_BASE)
+            if (address == COL80_BASE)
             {
                 pio_sm_put(pio, 1, count++);
             }
@@ -148,7 +147,7 @@ static void irq_handler()
         {
             u_int8_t data = (reg & 0xFF0000) >> 16;
             memory[address] = data;
-            if (address >= GetVidMemBase() && address < GetVidMemBase() + 0x200 || address == PIA_ADDR)
+            if ((address >= GetVidMemBase() && address < GetVidMemBase() + 0x200) || address == PIA_ADDR)
             {
                 updated = true;
                 gpio_put(LED_PIN, 1);
@@ -158,22 +157,22 @@ static void irq_handler()
 }
 #endif
 
-const uint debug_test_len = 32;
+const uint debug_text_len = 32;
 
-char debug_text[32];
+char debug_text[33];
 
 bool debug = false;
 
 void set_debug_text(char *text)
 {
-    strncpy(debug_text, text, debug_test_len);
+    strncpy(debug_text, text, debug_text_len);
 
-    for (int i = strnlen(text, debug_test_len); i < debug_test_len; i++)
+    for (unsigned int i = strnlen(text, debug_text_len); i < debug_text_len; i++)
     {
         debug_text[i] = ' ';
     }
 
-    for (int i = 0; i < debug_test_len; i++)
+    for (unsigned int i = 0; i < debug_text_len; i++)
     {
         unsigned char c = debug_text[i];
 
@@ -185,9 +184,13 @@ void set_debug_text(char *text)
         }
 #else
         if((c >= 0x20) && (c <= 0x3F))
-            c=c+0x40;
+        {
+            c = c + 0x40;
+        }
         else if ((c >= 0x60) && (c <= 0x7F))
-            c=c-0x60;
+        {
+            c = c - 0x60;
+        }
 #endif
         debug_text[i] = c;
     }
@@ -197,7 +200,7 @@ void update_debug_text()
 {
     if (debug)
     {
-        char buffer[40];
+        char buffer[32];
         uint mode = get_mode();
 
         uint bytes = bytes_per_row(mode) * get_height(mode);
@@ -287,9 +290,13 @@ void __no_inline_not_in_flash_func(main_loop())
                 uint16_t    sam_mask = GetSAMDataMask(address);
 
                 if (sam_data)
+                {
                     SAMBits |= sam_mask;
+                }
                 else
+                {
                     SAMBits &= ~sam_mask;
+                }
             }
 #endif
 #if (PLATFORM == PLATFORM_ATOM)
@@ -315,7 +322,7 @@ int main(void)
 
     stdio_init_all();
 
-    for (uint i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
+    for (int i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
     {
         memory[i] = 32;
     }
@@ -489,7 +496,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
     uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();    // index into semigraphics table
     uint rows_per_char  = 12 / sg_bytes_row[sgidx];     // bytes per character space vertically
 
-    if (row >= 0 && row < 16)
+    if (row < 16)
     {
         // Calc start address for this row
         uint vdu_address = ((chars_per_row * sg_bytes_row[sgidx]) * row) + (chars_per_row * (sub_row / rows_per_char));
@@ -503,19 +510,27 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             bool intext = GetIntExt(ch);
 
             if (as && intext)
+            {
                 sgidx = SG6_INDEX;           // SG6
+            }
 
             uint colour_index;
 
             if (SG6_INDEX == sgidx)
+            {
                 colour_index = (ch & SG6_COL_MASK) >> SG6_COL_SHIFT;
+            }
             else
+            {
                 colour_index = (ch & SG4_COL_MASK) >> SG4_COL_SHIFT;
+            }
 
             if (alt_colour())
             {
                 if (SG6_INDEX == sgidx)
+                {
                     colour_index += 4;
+                }
             }
 
             uint16_t colour = colour_palette_atom[colour_index];
@@ -528,9 +543,13 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
 
                 if (alt_colour())
+                {
                     colour = ORANGE;
+                }
                 else
+                {
                     colour = GREEN;
+                }
                 if (support_lower && ch >= LOWER_START && ch < LOWER_END)
                 {
                     b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
@@ -632,7 +651,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
         else
         {
 
-            const uint height = get_height(mode);
+            const int height = get_height(mode);
             relative_line_num = (relative_line_num / 2) * height / 192;
             if (relative_line_num >= 0 && relative_line_num < height)
             {
@@ -647,9 +666,9 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
                 const uint pixel_count = get_width(mode);
                 if (is_colour(mode))
                 {
+                    uint32_t word = 0;
                     for (uint pixel = 0; pixel < pixel_count; pixel++)
                     {
-                        uint32_t word;
                         if ((pixel % 16) == 0)
                         {
                             word = __builtin_bswap32(*bp++);
@@ -795,7 +814,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
 
     uint8_t *fd = fontdata + sub_row;
 
-    if (row >= 0 && row < 40)
+    if (row < 40)
     {
         // Compute the start address of the current row in the Atom framebuffer
         volatile uint8_t *char_addr = memory + GetVidMemBase() + 80 * row;
