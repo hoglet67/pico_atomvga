@@ -196,18 +196,20 @@ void set_debug_text(char *text)
     }
 }
 
+#define DEBUG_BUF_SIZE  80
+
 void update_debug_text()
 {
     if (debug)
     {
-        char buffer[32];
+        char buffer[DEBUG_BUF_SIZE];
         uint mode = get_mode();
 
         uint bytes = bytes_per_row(mode) * get_height(mode);
 
         uint m = (mode + 1) / 2;
 #if (PLATFORM == PLATFORM_ATOM)
-        sprintf(buffer, "mode %x/%d %dx%d %s %d",
+        snprintf(buffer, DEBUG_BUF_SIZE, "mode %x/%d %dx%d %s %d",
                 mode,
                 m,
                 get_width(mode),
@@ -215,14 +217,16 @@ void update_debug_text()
                 is_colour(mode) ? "col" : "b&w",
                 bytes);
 #elif (PLATFORM == PLATFORM_DRAGON)
-        sprintf(buffer, "mode %x/%d %dx%d %s %d %04X",
+        snprintf(buffer, DEBUG_BUF_SIZE, "mode %x/%d %dx%d %s %d %04X/%02X%02X",
                 mode,
                 m,
                 get_width(mode),
                 get_height(mode),
                 is_colour(mode) ? "col" : "b&w",
                 bytes,
-                SAMBits);
+                SAMBits,
+                memory[PIA_ADDR],
+                (memory[PIA_ADDR] & INTEXT_MASK));
 #endif
         set_debug_text(buffer);
     }
@@ -271,7 +275,7 @@ void __no_inline_not_in_flash_func(main_loop())
                 uint8_t b = 0x12;
                 pio_sm_put(pio, 1, 0xFF | (b << 8));
             }
-            else if ((address & 0xFFF0) == COL80_BASE)
+            else if ((address & COL80_MASK) == COL80_BASE)
             {
                 uint8_t b = memory[address];
                 pio_sm_put(pio, 1, 0xFF | (b << 8));
@@ -318,7 +322,7 @@ int main(void)
         vreg_set_voltage(VREG_VOLTAGE_1_25);
     }
     set_sys_clock_khz(sys_freq, true);
-    setup_default_uart();
+    //setup_default_uart();
 
     stdio_init_all();
 
@@ -485,7 +489,8 @@ uint16_t *add_border(uint16_t *p, uint16_t border_colour, uint16_t len)
 // pixels 0 and 1 are plotted.
 //
 
-uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, char *memory, uint16_t *p, bool is_debug)
+// Changed parameter memory to be called vdu_base to avoid clash with global memory -- PHS
+uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, char *vdu_base, uint16_t *p, bool is_debug)
 {
     // Screen is 16 rows x 32 columns
     // Each char is 12 x 8 pixels
@@ -504,7 +509,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
         for (int col = 0; col < 32; col++)
         {
             // Get character data from RAM and extract inv,ag,int/ext
-            uint ch = memory[vdu_address + col];
+            uint ch = vdu_base[vdu_address + col];
             bool inv    = (ch & INV_MASK) ? true : false;
             bool as     = (ch & AS_MASK) ? true : false;
             bool intext = GetIntExt(ch);
@@ -550,6 +555,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 {
                     colour = GREEN;
                 }
+
                 if (support_lower && ch >= LOWER_START && ch < LOWER_END)
                 {
                     b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];

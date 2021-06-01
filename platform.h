@@ -9,7 +9,7 @@
 #define PLATFORM_DRAGON 2
 
 #ifndef PLATFORM
-#define PLATFORM PLATFORM_ATOM
+#define PLATFORM PLATFORM_DRAGON
 #endif
 
 // Maximum memory used by 6847
@@ -27,6 +27,7 @@
 #define COL80_FG    0xBDE4
 #define COL80_BG    0xBDE5
 #define COL80_STAT  0xBDEF
+#define COL80_MASK  0xFFF0
 
 // Macros to get VDU memory base
 #define GetVidMemBase() FB_ADDR
@@ -61,6 +62,7 @@
 #define COL80_FG    0xFF89
 #define COL80_BG    0xFF8A
 #define COL80_STAT  0xFF8B
+#define COL80_MASK  0xFFF8
 
 volatile uint16_t    SAMBits;
 
@@ -101,7 +103,7 @@ volatile uint16_t    SAMBits;
 #define AS_MASK     0x80
 #define INTEXT_MASK 0x10
 
-#define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK) ? true : false;
+#define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK) ? true : false
 
 #define DRAGON_CMD_ADDR 0xFF80
 
