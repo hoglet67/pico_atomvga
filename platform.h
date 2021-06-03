@@ -103,7 +103,7 @@ volatile uint16_t    SAMBits;
 #define AS_MASK     0x80
 #define INTEXT_MASK 0x10
 
-#define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK) ? true : false
+#define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK)
 
 #define DRAGON_CMD_ADDR 0xFF80
 
@@ -115,6 +115,8 @@ volatile uint16_t    SAMBits;
 #define DRAGON_CMD_CHAR0    0x05
 #define DRAGON_CMD_CHAR1    0x06
 #define DRAGON_CMD_CHAR2    0x07
+#define DRAGON_CMD_CHAR3    0x08
+
 
 #define LOWER_START 0x00
 #define LOWER_END   0x20

@@ -20,6 +20,7 @@
 #include "hardware/irq.h"
 #include "hardware/vreg.h"
 #include "atomvga.h"
+#include "fonts.h"
 #include "platform.h"
 
 // PIA and frambuffer address moved into platform.h -- PHS
@@ -37,6 +38,8 @@ static PIO pio = pio1;
 static uint8_t *fontdata = fontdata_6847;
 
 static uint32_t vga80_lut[128 * 4];
+
+static uint8_t  fontno = 0;
 
 // Initialise the GPIO pins - overrides whatever the scanvideo library did
 static void initialiseIO()
@@ -91,7 +94,7 @@ int get_mode()
 #endif
 }
 
-bool alt_colour()
+inline bool alt_colour()
 {
 #if (PLATFORM == PLATFORM_ATOM)
     return !!(memory[PIA_ADDR + 2] & 0x8);
@@ -317,6 +320,7 @@ void __no_inline_not_in_flash_func(main_loop())
 int main(void)
 {
     uint sys_freq = 200000;
+    //uint sys_freq = 250000;
     if (sys_freq > 250000)
     {
         vreg_set_voltage(VREG_VOLTAGE_1_25);
@@ -332,6 +336,7 @@ int main(void)
     }
 
     char mess[32];
+
 
     // Display message and build date/time
     set_debug_text(DEBUG_MESS);
@@ -419,16 +424,21 @@ void check_command()
     }
     else if (DRAGON_CMD_CHAR0 == command)
     {
-        fontdata = fontdata_6847;
+        fontno=0;
     }
     else if (DRAGON_CMD_CHAR1 == command)
     {
-        fontdata = fontdata_6847t1;
+        fontno=1;
     }
     else if (DRAGON_CMD_CHAR2 == command)
     {
-        fontdata = fontdata_gime;
+        fontno=2;
     }
+    else if (DRAGON_CMD_CHAR3 == command)
+    {
+        fontno=3;
+    }
+
     memory[DRAGON_CMD_ADDR] = DRAGON_CMD_NONE;
 }
 #endif
@@ -510,55 +520,24 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
         {
             // Get character data from RAM and extract inv,ag,int/ext
             uint ch = vdu_base[vdu_address + col];
-            bool inv    = (ch & INV_MASK) ? true : false;
-            bool as     = (ch & AS_MASK) ? true : false;
-            bool intext = GetIntExt(ch);
+            uint8_t inv    = (ch & INV_MASK);
+            uint8_t as     = (ch & AS_MASK);
+            uint8_t intext = GetIntExt(ch);
 
-            if (as && intext)
-            {
-                sgidx = SG6_INDEX;           // SG6
-            }
-
-            uint colour_index;
-
-            if (SG6_INDEX == sgidx)
-            {
-                colour_index = (ch & SG6_COL_MASK) >> SG6_COL_SHIFT;
-            }
-            else
-            {
-                colour_index = (ch & SG4_COL_MASK) >> SG4_COL_SHIFT;
-            }
-
-            if (alt_colour())
-            {
-                if (SG6_INDEX == sgidx)
-                {
-                    colour_index += 4;
-                }
-            }
-
-            uint16_t colour = colour_palette_atom[colour_index];
+            uint16_t colour;
             uint16_t back_colour = 0;
 
             // Deal with text mode first as we can decide this purely on the setting of the
             // alpha/semi bit.
-            if(!as)
+            if(as != AS_MASK)
             {
-                uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
+                uint8_t b = fonts[fontno].fontdata[(ch & 0x3f) * 12 + sub_row];
 
-                if (alt_colour())
-                {
-                    colour = ORANGE;
-                }
-                else
-                {
-                    colour = GREEN;
-                }
+                colour = alt_colour() ? ORANGE : GREEN;
 
                 if (support_lower && ch >= LOWER_START && ch < LOWER_END)
                 {
-                    b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
+                    b = fonts[fontno].fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
                 }
                 else if (inv)
                 {
@@ -593,6 +572,22 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             }
             else        // Semigraphics
             {
+                uint colour_index;
+
+                if (as && intext)
+                {
+                    sgidx = SG6_INDEX;           // SG6
+                }
+
+                colour_index = (SG6_INDEX == sgidx) ? (ch & SG6_COL_MASK) >> SG6_COL_SHIFT :  (ch & SG4_COL_MASK) >> SG4_COL_SHIFT;
+
+                if (alt_colour() && (SG6_INDEX == sgidx))
+                {
+                    colour_index += 4;
+                }
+
+                colour = colour_palette_atom[colour_index];
+            
                 uint pix_row = (SG6_INDEX == sgidx) ? 2 - (sub_row / 4) : 1 - (sub_row / 6);
 
                 uint16_t pix0 = ((ch >> (pix_row * 2)) & 0x1) ? colour : back_colour;
