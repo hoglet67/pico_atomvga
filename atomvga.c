@@ -39,7 +39,8 @@ static uint8_t *fontdata = fontdata_6847;
 
 static uint32_t vga80_lut[128 * 4];
 
-static uint8_t  fontno = 0;
+static uint8_t  fontno = DEFAULT_FONT;
+static uint8_t  max_lower = LOWER_END;
 
 // Initialise the GPIO pins - overrides whatever the scanvideo library did
 static void initialiseIO()
@@ -220,7 +221,7 @@ void update_debug_text()
                 is_colour(mode) ? "col" : "b&w",
                 bytes);
 #elif (PLATFORM == PLATFORM_DRAGON)
-        snprintf(buffer, DEBUG_BUF_SIZE, "mode %x/%d %dx%d %s %d %04X/%02X%02X",
+        snprintf(buffer, DEBUG_BUF_SIZE, "mode %x/%d %dx%d %s %d %04X %02X",
                 mode,
                 m,
                 get_width(mode),
@@ -228,8 +229,7 @@ void update_debug_text()
                 is_colour(mode) ? "col" : "b&w",
                 bytes,
                 SAMBits,
-                memory[PIA_ADDR],
-                (memory[PIA_ADDR] & INTEXT_MASK));
+                max_lower);
 #endif
         set_debug_text(buffer);
     }
@@ -255,6 +255,19 @@ bool is_command(char *cmd)
         return true;
     }
     return false;
+}
+
+void switch_font(uint8_t new_font)
+{
+    uint8_t font_range;
+ 
+    // make sure new fontno is valid.....
+    fontno = (new_font < FONT_COUNT) ? new_font : DEFAULT_FONT;
+
+    // Calculate range of available lower case symbols
+    font_range = fonts[fontno].last_upper - fonts[fontno].first_upper;
+
+    max_lower = (font_range < LOWER_RANGE) ? LOWER_START + font_range : LOWER_END;
 }
 
 volatile bool support_lower = false;
@@ -305,6 +318,12 @@ void __no_inline_not_in_flash_func(main_loop())
                     SAMBits &= ~sam_mask;
                 }
             }
+
+            // Change the font as requested
+            if (DRAGON_FONTNO_ADDR == address)
+            {
+                switch_font(data);
+            }
 #endif
 #if (PLATFORM == PLATFORM_ATOM)
             // hack to reset the vga80x40 mode when BREAK is pressed
@@ -330,13 +349,14 @@ int main(void)
 
     stdio_init_all();
 
+    switch_font(DEFAULT_FONT);
+    
     for (int i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
     {
         memory[i] = 32;
     }
 
     char mess[32];
-
 
     // Display message and build date/time
     set_debug_text(DEBUG_MESS);
@@ -404,42 +424,30 @@ void check_command()
 #elif (PLATFORM == PLATFORM_DRAGON)
 void check_command()
 {
+    static uint8_t oldcommand = 0;
     uint8_t command = memory[DRAGON_CMD_ADDR];
 
-    if (DRAGON_CMD_DEBUG == command)
+    if(command != oldcommand)
     {
-        debug = true;
-    }
-    else if (DRAGON_CMD_NODEBUG == command)
-    {
-        debug = false;
-    }
-    else if (DRAGON_CMD_LOWER == command)
-    {
-        support_lower = true;
-    }
-    else if (DRAGON_CMD_NOLOWER == command)
-    {
-        support_lower = false;
-    }
-    else if (DRAGON_CMD_CHAR0 == command)
-    {
-        fontno=0;
-    }
-    else if (DRAGON_CMD_CHAR1 == command)
-    {
-        fontno=1;
-    }
-    else if (DRAGON_CMD_CHAR2 == command)
-    {
-        fontno=2;
-    }
-    else if (DRAGON_CMD_CHAR3 == command)
-    {
-        fontno=3;
-    }
+        if (DRAGON_CMD_DEBUG == command)
+        {
+            debug = true;
+        }
+        else if (DRAGON_CMD_NODEBUG == command)
+        {
+            debug = false;
+        }
+        else if (DRAGON_CMD_LOWER == command)
+        {
+            support_lower = true;
+        }
+        else if (DRAGON_CMD_NOLOWER == command)
+        {
+            support_lower = false;
+        }
 
-    memory[DRAGON_CMD_ADDR] = DRAGON_CMD_NONE;
+        oldcommand=command;
+    }
 }
 #endif
 
@@ -525,7 +533,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             uint8_t intext = GetIntExt(ch);
 
             uint16_t colour;
-            uint16_t back_colour = 0;
+            uint16_t back_colour = BLACK;
 
             // Deal with text mode first as we can decide this purely on the setting of the
             // alpha/semi bit.
@@ -535,14 +543,20 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
 
                 colour = alt_colour() ? ORANGE : GREEN;
 
-                if (support_lower && ch >= LOWER_START && ch < LOWER_END)
+                if (support_lower && ch >= LOWER_START && ch <= max_lower)
                 {
                     b = fonts[fontno].fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
+
+                    if (LOWER_INVERT)
+                    {
+                        back_colour = colour;
+                        colour = BLACK;    
+                    }
                 }
                 else if (inv)
                 {
                     back_colour = colour;
-                    colour = 0;
+                    colour = BLACK;
                 }
 
                 if (b == 0)
@@ -553,21 +567,19 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 }
                 else
                 {
-                    // bits 0,6 and 7 are always 0
+                    // The internal character generator is only 6 bits wide, however external
+                    // character ROMS are 8 bits wide so we must handle them here
+                    uint16_t c = (b & 0x80) ? colour : back_colour;
                     *p++ = COMPOSABLE_RAW_RUN;
-                    *p++ = back_colour;     // bit 7
+                    *p++ = c;
                     *p++ = 16 - 3;
-                    *p++ = back_colour;
-                    *p++ = back_colour;     // bit 6
-                    *p++ = back_colour;
-                    for (uint8_t mask = 0x20; mask > 1; mask = mask >> 1)
+                    *p++ = c;
+                    for (uint8_t mask = 0x40; mask > 0; mask = mask >> 1)
                     {
-                        const uint16_t c = (b & mask) ? colour : back_colour;
+                        c = (b & mask) ? colour : back_colour;
                         *p++ = c;
                         *p++ = c;
                     }
-                    *p++ = back_colour;     // bit 0
-                    *p++ = back_colour;
                 }
             }
             else        // Semigraphics

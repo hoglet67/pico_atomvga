@@ -45,8 +45,10 @@
 // Always 0 on Atom
 #define GetSAMSG()      0
 
-#define LOWER_START 0x80
-#define LOWER_END   0xA0
+#define LOWER_START   0x80
+#define LOWER_END     0xA0
+#define LOWER_RANGE   (LOWER_END-LOWER_START)
+#define LOWER_INVERT  0
 
 #endif
 
@@ -105,7 +107,8 @@ volatile uint16_t    SAMBits;
 
 #define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK)
 
-#define DRAGON_CMD_ADDR 0xFF80
+#define DRAGON_CMD_ADDR     0xFF80
+#define DRAGON_FONTNO_ADDR  0xFF81
 
 #define DRAGON_CMD_NONE     0x00
 #define DRAGON_CMD_DEBUG    0x01
@@ -118,8 +121,10 @@ volatile uint16_t    SAMBits;
 #define DRAGON_CMD_CHAR3    0x08
 
 
-#define LOWER_START 0x00
-#define LOWER_END   0x20
+#define LOWER_START   0x00
+#define LOWER_END     0x40
+#define LOWER_RANGE   (LOWER_END-LOWER_START)
+#define LOWER_INVERT  1
 
 #endif
 
