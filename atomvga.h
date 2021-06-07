@@ -24,19 +24,8 @@
 #define ORANGE (RED | GREEN_2)
 #define MAGENTA (RED | BLUE)
 
-uint16_t text_palette[8] = {
-    GREEN,
-    YELLOW,
-    GREEN,
-    RED,
-    ORANGE,
-    CYAN,
-    ORANGE,
-    ORANGE
-
-};
-
-uint16_t colour_palette_atom[8] = {
+#define NO_COLOURS  9
+uint16_t colour_palette_atom[NO_COLOURS] = {
     GREEN,
     YELLOW,
     BLUE,
@@ -45,7 +34,22 @@ uint16_t colour_palette_atom[8] = {
     CYAN,
     MAGENTA,
     ORANGE,
+    BLACK
 };
+
+#define IDX_GREEN   0
+#define IDX_YELLOW  1
+#define IDX_BLUE    2
+#define IDX_RED     3
+#define IDX_WHITE   4
+#define IDX_CYAN    5   
+#define IDX_MAGENTA 6
+#define IDX_ORANGE  7
+#define IDX_BLACK   8
+
+#define DEF_INK     IDX_GREEN 
+#define DEF_PAPER   IDX_BLACK
+#define DEF_INK_ALT IDX_ORANGE
 
 uint16_t colour_palette_vga80[8] = {
     BLACK,
@@ -64,6 +68,21 @@ uint16_t colour_palette_improved[4] = {
     GREEN,
     MAGENTA,
 };
+
+uint16_t colour_palette_artifact1[4] = {
+    BLACK,
+    BLUE,
+    ORANGE,
+    WHITE,
+};
+
+uint16_t colour_palette_artifact2[4] = {
+    BLACK,
+    ORANGE,
+    BLUE,
+    WHITE,
+};
+
 
 // Masks to extract pixel colours from SG4 and SG6 bytes
 #define SG4_COL_MASK    0x70
@@ -89,15 +108,12 @@ const uint sg_bytes_row[5]  = {1, 4, 6, 12, 1};
 
 uint16_t *colour_palette = colour_palette_atom;
 
-inline bool is_colour(uint mode)
-{
-    return !(mode & 0b10);
-};
-
 //                             0  1a   1   2a    2   3a    3   4a    4
 //                             0  1    2    3    4    5    6    7    8
 const uint width_lookup[9] =  {32, 64, 128, 128, 128, 128, 128, 128, 256};
 const uint height_lookup[9] = {16, 64,  64,  64,  96,  96, 192, 192, 192};
+
+inline bool is_colour(uint mode);
 
 uint get_width(uint mode)
 {

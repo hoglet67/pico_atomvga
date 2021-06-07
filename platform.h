@@ -50,6 +50,8 @@
 #define LOWER_RANGE   (LOWER_END-LOWER_START)
 #define LOWER_INVERT  0
 
+// 6502 reset vector
+#define RESET_VEC 0xFFFC
 #endif
 
 #if (PLATFORM==PLATFORM_DRAGON)
@@ -105,27 +107,30 @@ volatile uint16_t    SAMBits;
 #define AS_MASK     0x80
 #define INTEXT_MASK 0x10
 
-#define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK)
+#define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK) ? true : false;
 
 #define DRAGON_CMD_ADDR     0xFF80
 #define DRAGON_FONTNO_ADDR  0xFF81
+#define DRAGON_INK_ADDR     0xFF82
+#define DRAGON_PAPER_ADDR   0xFF83
+#define DRAGON_INKALT_ADDR  0xFF84
 
 #define DRAGON_CMD_NONE     0x00
 #define DRAGON_CMD_DEBUG    0x01
 #define DRAGON_CMD_NODEBUG  0x02
 #define DRAGON_CMD_LOWER    0x03
 #define DRAGON_CMD_NOLOWER  0x04
-#define DRAGON_CMD_CHAR0    0x05
-#define DRAGON_CMD_CHAR1    0x06
-#define DRAGON_CMD_CHAR2    0x07
-#define DRAGON_CMD_CHAR3    0x08
-
+#define DRAGON_CMD_ARTIOFF  0x05
+#define DRAGON_CMD_ARTI1    0x06
+#define DRAGON_CMD_ARTI2    0x07
 
 #define LOWER_START   0x00
 #define LOWER_END     0x40
 #define LOWER_RANGE   (LOWER_END-LOWER_START)
 #define LOWER_INVERT  1
 
+// 6809 reset vector
+#define RESET_VEC 0xFFFE
 #endif
 
 
