@@ -581,11 +581,11 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
     // Each char is 12 x 8 pixels
     // Note we divide ralative_line_number by 2 as we are double scanning each 6847 line to
     // 2 VGA lines.
-    uint row = (relative_line_num / 2) / 12;            // char row
-    uint sub_row = (relative_line_num / 2) % 12;        // scanline within current char row
-    uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();    // index into semigraphics table
-    uint rows_per_char  = 12 / sg_bytes_row[sgidx];     // bytes per character space vertically
-    uint8_t *fontdata = fonts[fontno].fontdata;         // Local fontdata pointer
+    uint row = (relative_line_num / 2) / 12;                // char row
+    uint sub_row = (relative_line_num / 2) % 12;            // scanline within current char row
+    uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();        // index into semigraphics table
+    uint rows_per_char  = 12 / sg_bytes_row[sgidx];         // bytes per character space vertically
+    uint8_t *fontdata = fonts[fontno].fontdata + sub_row;   // Local fontdata pointer
     
     if (row < 16)
     {
@@ -607,13 +607,13 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             // alpha/semi bit.
             if(!as)
             {
-                uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
+                uint8_t b = fontdata[(ch & 0x3f) * 12];
 
                 fg_colour = alt_colour() ? ink_alt : ink;
 
                 if (support_lower && ch >= LOWER_START && ch <= max_lower)
                 {
-                    b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
+                    b = fontdata[((ch & 0x3f) + 64) * 12];
 
                     if (LOWER_INVERT)
                     {
