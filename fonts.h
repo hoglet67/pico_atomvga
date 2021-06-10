@@ -1179,7 +1179,11 @@ font_t fonts[] =
     {fontdata_spectrum, 0x40,   0x5F}       // Sinclair spectrum
 };
 
-#define DEFAULT_FONT    0
+#define FONT_6847       0
+#define FONT_GIME       1
+#define FONT_6847T1     2
+
+#define DEFAULT_FONT    FONT_6847
 #define FONT_COUNT      (sizeof(fonts) / sizeof(font_t))
 
 #endif

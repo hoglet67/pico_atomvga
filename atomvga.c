@@ -42,9 +42,9 @@ static uint32_t vga80_lut[128 * 4];
 volatile uint8_t fontno = DEFAULT_FONT;
 volatile uint8_t max_lower = LOWER_END;
 
-volatile uint8_t ink = DEF_INK;
-volatile uint8_t ink_alt = DEF_INK_ALT;  
-volatile uint8_t paper = DEF_PAPER;
+volatile uint16_t ink = DEF_INK;
+volatile uint16_t ink_alt = DEF_INK_ALT;  
+volatile uint16_t paper = DEF_PAPER;
 
 volatile uint8_t artifact = 0;
 
@@ -291,11 +291,11 @@ void switch_font(uint8_t new_font)
 }
 
 void switch_colour(uint8_t          newcolour,
-                   volatile uint8_t *tochange)
+                   volatile uint16_t *tochange)
 {
     if (newcolour < NO_COLOURS)
     {
-        *tochange=newcolour;
+        *tochange=colour_palette_atom[newcolour];
     }
 }
 
@@ -464,15 +464,15 @@ void check_command()
     }
     else if (is_command("CHARSET0"))
     {
-        fontdata = fontdata_6847;
+        switch_font(FONT_6847);
     }
     else if (is_command("CHARSET1"))
     {
-        fontdata = fontdata_6847t1;
+        switch_font(FONT_GIME);
     }
     else if (is_command("CHARSET2"))
     {
-        fontdata = fontdata_gime;
+        switch_font(FONT_6847T1);
     }
 }
 #elif (PLATFORM == PLATFORM_DRAGON)
@@ -506,8 +506,8 @@ void check_reset(void)
         // back to 32 column mode
         reset_vga80();
         
-        // reset colours if ink and paper are the same!
-        if(ink == paper)
+        // reset colours if ink and paper are the same, or are invalid
+        if((ink == paper) || (ink > MAX_COLOUR) || (ink_alt > MAX_COLOUR) || (paper > MAX_COLOUR))
         {
             ink = DEF_INK;
             paper = DEF_PAPER;
@@ -585,7 +585,8 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
     uint sub_row = (relative_line_num / 2) % 12;        // scanline within current char row
     uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();    // index into semigraphics table
     uint rows_per_char  = 12 / sg_bytes_row[sgidx];     // bytes per character space vertically
-
+    uint8_t *fontdata = fonts[fontno].fontdata;         // Local fontdata pointer
+    
     if (row < 16)
     {
         // Calc start address for this row
@@ -600,30 +601,30 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             bool intext = GetIntExt(ch);
 
             uint16_t fg_colour;
-            uint16_t bg_colour = colour_palette_atom[paper];
+            uint16_t bg_colour = paper;
 
             // Deal with text mode first as we can decide this purely on the setting of the
             // alpha/semi bit.
             if(!as)
             {
-                uint8_t b = fonts[fontno].fontdata[(ch & 0x3f) * 12 + sub_row];
+                uint8_t b = fontdata[(ch & 0x3f) * 12 + sub_row];
 
-                fg_colour = alt_colour() ? colour_palette_atom[ink_alt] : colour_palette_atom[ink];
+                fg_colour = alt_colour() ? ink_alt : ink;
 
                 if (support_lower && ch >= LOWER_START && ch <= max_lower)
                 {
-                    b = fonts[fontno].fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
+                    b = fontdata[((ch & 0x3f) + 64) * 12 + sub_row];
 
                     if (LOWER_INVERT)
                     {
                         bg_colour = fg_colour;
-                        fg_colour = colour_palette_atom[paper];    
+                        fg_colour = paper;    
                     }
                 }
                 else if (inv)
                 {
                     bg_colour = fg_colour;
-                    fg_colour = colour_palette_atom[paper];
+                    fg_colour = paper;
                 }
 
                 if (b == 0)

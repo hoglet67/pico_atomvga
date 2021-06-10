@@ -47,9 +47,12 @@ uint16_t colour_palette_atom[NO_COLOURS] = {
 #define IDX_ORANGE  7
 #define IDX_BLACK   8
 
-#define DEF_INK     IDX_GREEN 
-#define DEF_PAPER   IDX_BLACK
-#define DEF_INK_ALT IDX_ORANGE
+#define MAX_COLOUR  8
+
+#define DEF_INK     GREEN 
+#define DEF_PAPER   BLACK
+#define DEF_INK_ALT ORANGE
+
 
 uint16_t colour_palette_vga80[8] = {
     BLACK,
