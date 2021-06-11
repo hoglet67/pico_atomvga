@@ -19,8 +19,9 @@
 
 .wrap_target
     pull block                                          ; wait for CPU to send data
-    out PINDIRS 8           side DATA                   ; first byte = 0xFF
-    out PINS 8                                          ; second byte = the data
+    out PINS 8                                          ; first byte = the data
+    out PINDIRS 8           side DATA                   ; second byte = 0xFF
+    wait 1 GPIO PIN_1MHZ                                ; wait for clock 1
     wait 0 GPIO PIN_1MHZ                                ; wait for clock 0
     out PINDIRS 8           side ADDRESS_LOW            ; third byte - 0x00
 .wrap

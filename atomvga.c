@@ -263,22 +263,28 @@ void __no_inline_not_in_flash_func(main_loop())
         // Get event from SM 0
         u_int32_t reg = pio_sm_get_blocking(pio, 0);
 
+        if ((reg & 0x100FF80) == 0xA00)
+        {
+            // Read in range 0A00 to 0A7F
+            pio_sm_put(pio, 1, 0xFF00 | memory[reg]);
+        }
+
         // Get the address
         u_int16_t address = reg & 0xFFFF;
 
         // Is it a read or write opertaion?
-        if (reg & 0x1000000)
+        if (!(reg & 0x1000000))
         {
             // read
             if (address == COL80_STAT)
             {
                 uint8_t b = 0x12;
-                pio_sm_put(pio, 1, 0xFF | (b << 8));
+                pio_sm_put(pio, 1, 0xFF00 | b);
             }
             else if ((address & COL80_MASK) == COL80_BASE)
             {
                 uint8_t b = memory[address];
-                pio_sm_put(pio, 1, 0xFF | (b << 8));
+                pio_sm_put(pio, 1, 0xFF00 | b);
             }
         }
         else
@@ -316,7 +322,7 @@ void __no_inline_not_in_flash_func(main_loop())
 
 int main(void)
 {
-    uint sys_freq = 200000;
+    uint sys_freq = 250000;
     if (sys_freq > 250000)
     {
         vreg_set_voltage(VREG_VOLTAGE_1_25);
