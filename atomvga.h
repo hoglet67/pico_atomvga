@@ -135,4 +135,8 @@ uint bytes_per_row(uint mode)
     return is_colour(mode) ? get_width(mode) * 2 / 8 : get_width(mode) / 8;
 };
 
+#define COL80_OFF   0x00
+#define COL80_ON    0x80
+#define COL80_ATTR  0x08
+
 #endif /* ATOMVGA_H_ */

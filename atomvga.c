@@ -120,7 +120,7 @@ inline bool is_artifact(uint mode)
 // Treat artifacted pmode 4 as pmode 3 with a different palette
 inline bool is_colour(uint mode)
 {
-    return /*is_artifact(mode) ? true : */ !(mode & 0b10);
+    return !(mode & 0b10);
 };
 
 
@@ -259,6 +259,7 @@ void update_debug_text()
     }
 }
 
+#if 0
 bool is_command(char *cmd)
 {
     char *p = (char *)memory + 0xf000;
@@ -276,6 +277,57 @@ bool is_command(char *cmd)
     }
     return false;
 }
+#endif
+
+#if (PLATFORM == PLATFORM_ATOM)
+bool is_command(char *cmd,
+                char **params)
+{
+    char *p = (char *)memory + CMD_BASE;
+    *params=(char *)NULL;   
+    
+    while (*cmd != 0)
+    {
+        if (*cmd++ != *p++)
+        {
+            return false;
+        }
+    }
+
+    if ((ATOM_EOL == *p) || (SPACE == *p))
+    {
+        *params = p;
+        return true;
+    }
+    return false;
+}
+
+int uint8_param(char	*params,
+                uint8_t *output,
+                uint8_t min,
+                uint8_t max)
+{
+    uint8_t try;
+    
+    while ((SPACE == *params) && (ATOM_EOL != *params))
+    {
+        params++;
+    }
+    
+    if(*params != ATOM_EOL)
+    {
+        if(sscanf(params,"%hhd",&try) == 1)
+        {
+            if((try >= min) && (try <= max))
+            {
+                *output=try;
+                return 1;
+            }
+        }
+    }        
+    return 0;
+}
+#endif
 
 void switch_font(uint8_t new_font)
 {
@@ -377,14 +429,6 @@ void __no_inline_not_in_flash_func(main_loop())
             {
                 switch_colour(data,&ink_alt);
             }
-
-#endif
-#if (PLATFORM == PLATFORM_ATOM)
-            // hack to reset the vga80x40 mode when BREAK is pressed
-            if (address == 0xb003 && data == 0x8a)
-            {
-                reset_vga80();
-            }
 #endif
         }
     }
@@ -446,34 +490,86 @@ int main(void)
 #if (PLATFORM == PLATFORM_ATOM)
 void check_command()
 {
-    if (is_command("DEBUG"))
+    char    *params = (char *)NULL;
+    uint8_t temp;
+
+    if (is_command("DEBUG",&params))
     {
         debug = true;
+        ClearCommand();
     }
-    else if (is_command("NODEBUG"))
+    else if (is_command("NODEBUG",&params))
     {
         debug = false;
+        ClearCommand();
     }
-    else if (is_command("LOWER"))
+    else if (is_command("LOWER",&params))
     {
         support_lower = true;
+        ClearCommand();
     }
-    else if (is_command("NOLOWER"))
+    else if (is_command("NOLOWER",&params))
     {
         support_lower = false;
+        ClearCommand();
     }
-    else if (is_command("CHARSET0"))
+    else if (is_command("CHARSET",&params))
     {
-        switch_font(FONT_6847);
+        temp=fontno;
+        if (uint8_param(params,&temp,0,FONT_COUNT-1))
+        {
+            switch_font(temp);
+        }
+        ClearCommand();
     }
-    else if (is_command("CHARSET1"))
+    else if (is_command("FG",&params))
+    {
+        if (uint8_param(params,&temp,0,NO_COLOURS-1))
+        {
+            switch_colour(temp,&ink);        
+        }
+        ClearCommand();
+    }
+    else if (is_command("FGA",&params))
+    {
+        if (uint8_param(params,&temp,0,NO_COLOURS-1))
+        {
+            switch_colour(temp,&ink_alt);
+        }
+        ClearCommand();
+    }
+    else if (is_command("BG",&params))
+    {
+        if (uint8_param(params,&temp,0,NO_COLOURS-1))
+        {
+            switch_colour(temp,&paper);
+        }
+        ClearCommand();
+    }
+    else if (is_command("ARTI",&params))
+    {
+        if (uint8_param(params,&temp,0,2))
+        {
+            artifact = temp;
+        }
+        ClearCommand();
+    }
+    else if (is_command("80COL",&params))
+    {
+        memory[COL80_BASE] = COL80_ON;
+        ClearCommand();
+    }
+
+#if 0
+    else if (is_command("CHARSET1",params))
     {
         switch_font(FONT_GIME);
     }
-    else if (is_command("CHARSET2"))
+    else if (is_command("CHARSET2",params))
     {
         switch_font(FONT_6847T1);
     }
+#endif
 }
 #elif (PLATFORM == PLATFORM_DRAGON)
 void check_command()
@@ -506,8 +602,8 @@ void check_reset(void)
         // back to 32 column mode
         reset_vga80();
         
-        // reset colours if ink and paper are the same, or are invalid
-        if((ink == paper) || (ink > MAX_COLOUR) || (ink_alt > MAX_COLOUR) || (paper > MAX_COLOUR))
+        // reset colours if ink and paper are the same
+        if(ink == paper)
         {
             ink = DEF_INK;
             paper = DEF_PAPER;
@@ -886,9 +982,9 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
 void reset_vga80()
 {
-    memory[COL80_BASE] = 0x00;  // Normal text mode (vga80 off)
-    memory[COL80_FG] = 0xB2;    // Foreground Green
-    memory[COL80_BG] = 0x00;    // Background Black
+    memory[COL80_BASE] = COL80_OFF;     // Normal text mode (vga80 off)
+    memory[COL80_FG] = 0xB2;            // Foreground Green
+    memory[COL80_BG] = 0x00;            // Background Black
 }
 
 void initialize_vga80()
@@ -1058,7 +1154,7 @@ void core1_func()
     sem_release(&video_initted);
     while (true)
     {
-        uint vga80 = memory[COL80_BASE] & 0x80;
+        uint vga80 = memory[COL80_BASE] & COL80_ON;
         scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
         if (vga80)
         {

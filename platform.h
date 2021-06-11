@@ -50,6 +50,16 @@
 #define LOWER_RANGE   (LOWER_END-LOWER_START)
 #define LOWER_INVERT  0
 
+#define CMD_BASE	0xF000
+
+#define ATOM_EOL	0x0D
+#define SPACE	    0x20
+
+#define CMD_LEN	16
+#define CMD_FONT	"FONT"
+
+#define ClearCommand()	memory[CMD_BASE]=0x00
+
 // 6502 reset vector
 #define RESET_VEC 0xFFFC
 #endif
