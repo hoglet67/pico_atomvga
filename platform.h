@@ -62,6 +62,8 @@
 
 // 6502 reset vector
 #define RESET_VEC 0xFFFC
+
+#define VDG_SPACE 32
 #endif
 
 #if (PLATFORM==PLATFORM_DRAGON)
@@ -133,6 +135,10 @@ volatile uint16_t    SAMBits;
 #define DRAGON_CMD_ARTIOFF  0x05
 #define DRAGON_CMD_ARTI1    0x06
 #define DRAGON_CMD_ARTI2    0x07
+#define DRAGON_CMD_SAVEEE   0x08
+#define DRAGON_CMD_LOADEE   0x09
+#define DRAGON_CMD_AUTOOFF  0x0A
+#define DRAGON_CMD_AUTOON   0x0B
 
 #define LOWER_START   0x00
 #define LOWER_END     0x40
@@ -141,6 +147,20 @@ volatile uint16_t    SAMBits;
 
 // 6809 reset vector
 #define RESET_VEC 0xFFFE
+
+// EEprom offsets
+// Note, ink, paper and ink_alt are *WORDS*
+#define EE_AUTOLOAD   0x00
+#define EE_FONTNO     0x01
+#define EE_INK        0x02
+#define EE_PAPER      0x04
+#define EE_INK_ALT    0x08
+#define EE_ISLOWER    0x0A
+
+#define AUTO_ON       0x01
+#define AUTO_OFF      0x00
+
+#define VDG_SPACE     96
 #endif
 
 

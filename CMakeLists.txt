@@ -41,6 +41,7 @@ pico_enable_stdio_uart(atomvga 1)
 
 add_executable(dragonvga
   atomvga.c
+  eeprom.c
   )
 
 pico_generate_pio_header(dragonvga ${CMAKE_CURRENT_LIST_DIR}/atomvga.pio)
@@ -54,6 +55,7 @@ target_link_libraries(dragonvga PRIVATE
   pico_stdlib
   pico_scanvideo_dpi
   hardware_pio
+  hardware_i2c
   )
 
 pico_add_extra_outputs(dragonvga)

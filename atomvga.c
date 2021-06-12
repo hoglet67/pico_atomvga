@@ -22,6 +22,9 @@
 #include "atomvga.h"
 #include "fonts.h"
 #include "platform.h"
+#if (PLATFORM == PLATFORM_DRAGON)
+#include "eeprom.h"
+#endif 
 
 // PIA and frambuffer address moved into platform.h -- PHS
 
@@ -45,6 +48,8 @@ volatile uint8_t max_lower = LOWER_END;
 volatile uint16_t ink = DEF_INK;
 volatile uint16_t ink_alt = DEF_INK_ALT;  
 volatile uint16_t paper = DEF_PAPER;
+
+volatile uint8_t autoload = 0;
 
 volatile uint8_t artifact = 0;
 
@@ -90,6 +95,8 @@ bool updated;
 volatile uint8_t memory[0x10000];
 
 #define CSI "\x1b["
+
+void load_ee(void);
 
 // Returns video mode as far as VDG is concerned, with the bits :
 //  b3  b2  b1  b0
@@ -448,10 +455,19 @@ int main(void)
     stdio_init_all();
 
     switch_font(DEFAULT_FONT);
+
+#if (PLATFORM == PLATFORM_DRAGON)
+    init_ee();
+    read_ee(EE_ADDRESS,EE_AUTOLOAD,(uint8_t *)&autoload);
+    if(AUTO_ON == autoload)
+    {
+        load_ee();
+    }
+#endif
     
     for (int i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
     {
-        memory[i] = 32;
+        memory[i] = VDG_SPACE;
     }
 
     char mess[32];
@@ -572,6 +588,44 @@ void check_command()
 #endif
 }
 #elif (PLATFORM == PLATFORM_DRAGON)
+
+void save_ee(void)
+{
+    if (0 <= write_ee(EE_ADDRESS,EE_AUTOLOAD,autoload))
+    {
+        write_ee(EE_ADDRESS,EE_FONTNO,fontno);
+        write_ee_bytes(EE_ADDRESS,EE_INK,(uint8_t *)&ink,sizeof(ink));
+        write_ee_bytes(EE_ADDRESS,EE_PAPER,(uint8_t *)&paper,sizeof(paper));
+        write_ee_bytes(EE_ADDRESS,EE_INK_ALT,(uint8_t *)&ink_alt,sizeof(ink_alt));
+        write_ee(EE_ADDRESS,EE_ISLOWER,support_lower);
+
+        printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, lower=%d\n",fontno,ink,paper,ink_alt,support_lower);
+    }
+}
+
+void load_ee(void)
+{
+    uint8_t tempb;
+
+    if(0 <= read_ee(EE_ADDRESS,EE_AUTOLOAD,(uint8_t *)&autoload))
+    {
+        read_ee(EE_ADDRESS,EE_FONTNO,&tempb);
+        switch_font(tempb);
+
+        read_ee_bytes(EE_ADDRESS,EE_INK,(uint8_t *)&ink,sizeof(ink));
+        read_ee_bytes(EE_ADDRESS,EE_PAPER,(uint8_t *)&paper,sizeof(paper));
+        read_ee_bytes(EE_ADDRESS,EE_INK_ALT,(uint8_t *)&ink_alt,sizeof(ink_alt));
+        read_ee(EE_ADDRESS,EE_ISLOWER,(uint8_t *)&support_lower);
+
+        printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, lower=%d\n",fontno,ink,paper,ink_alt,support_lower);
+    }
+}
+
+void set_auto(uint8_t state)
+{
+    write_ee(EE_ADDRESS,EE_AUTOLOAD,state);
+}
+
 void check_command()
 {
     static uint8_t oldcommand = 0;
@@ -588,6 +642,10 @@ void check_command()
             case DRAGON_CMD_ARTIOFF : artifact = 0; break;
             case DRAGON_CMD_ARTI1   : artifact = 1; break;
             case DRAGON_CMD_ARTI2   : artifact = 2; break;
+            case DRAGON_CMD_SAVEEE  : save_ee(); break;
+            case DRAGON_CMD_LOADEE  : load_ee(); break;
+            case DRAGON_CMD_AUTOOFF : set_auto(AUTO_OFF); break;
+            case DRAGON_CMD_AUTOON  : set_auto(AUTO_ON); break;
         }
 
         oldcommand=command;

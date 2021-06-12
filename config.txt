@@ -1,0 +1,124 @@
+Atom configuration settings
+
+These are set from basic by writing the command as a string to #F000
+e.g. :
+
+$#F000="command value"
+Where commands are supplied a value it is generally a decimal number.
+
+Valid commands are :
+
+DEBUG
+    Turn debug line on
+
+NODEBUG
+    Turn debug line off
+
+LOWER    
+    Turn lowercase characters on
+
+NOLOWER    
+    Turn lowercase characters off
+
+CHARSET dd
+    Select character set dd 
+
+        0 Default 6847 font
+        1 6847T1 font
+        2 Gime font from the CoCo 3
+        3 Dragon Alpha boot rom font
+        4 BBC micro font
+        5 IBM CGA, thick characters
+        6 IBM CGA, thin characters
+        7 Dragon 200 external character generator font
+        8 SAA5050 Teletext font
+        9 Sinclair Spectrum font
+
+FG dd
+    Select foreground colour
+        0 Green
+        1 Yellow
+        2 Blue
+        3 Red
+        4 White
+        5 Cyan
+        6 Magenta
+        7 Orange
+        8 Black
+
+    Invalid values are ignored.
+
+FGA dd
+    Select alternate foreground colour
+    Colours as for FG command
+    Invalid values are ignored.
+
+BG dd
+    Select background colour
+    Colours as for FG command
+    Invalid values are ignored.
+
+ARTI dd
+    Select artifact colours in clear 4 mode
+    0 Turns artifact colours off
+    1 Selects artifact set 1
+    2 Selects artifact set 2
+    
+80COL
+    Switches to 80 col mode    
+
+
+
+
+DragonVGA port assignments and meanings:
+
+These can be set with a POKE command from BASIC or by storing the value 
+in the locations from assembler.
+
+$FF80   Command port, see command list below.
+        Valid commands are :
+        $00 Turn debug line off
+        $01 Turn debug line off
+        $02 Turn lowercase chars off
+        $03 Turn lowercase chars on
+        $04 Turn off artifact colours in pmode 4
+        $05 Turn on artifact colours set 1 in pmode 4
+        $06 Turn on artifact colours set 2 in pmode 4
+        $07 Save current settings to eeprom
+        $08 Load current settings from eeprom
+        $09 Disable automatic loading of settings from eprom at power on
+        $0A Enable automatic loading of settings from eprom at power on
+
+$FF81   Select font number :
+        $00 Default 6847 font
+        $01 6847T1 font
+        $02 Gime font from the CoCo 3
+        $03 Dragon Alpha boot rom font
+        $04 BBC micro font
+        $05 IBM CGA, thick characters
+        $06 IBM CGA, thin characters
+        $07 Dragon 200 external character generator font
+        $08 SAA5050 Teletext font
+        $09 Sinclair Spectrum font
+
+$FF82   Text / SG Background colour 
+        $00 Green
+        $01 Yellow
+        $02 Blue
+        $03 Red
+        $04 White
+        $05 Cyan
+        $06 Magenta
+        $07 Orange
+        $08 Black
+
+        Invalid values leave colour unchanged.
+
+$FF83   Text / SG Foreground colour used when CSS=0
+        Colours as Background        
+        Invalid values leave colour unchanged.
+
+$FF84   Text / SG alternate Foreground colour, used when CSS=1
+        Colours as Background        
+        Invalid values leave colour unchanged.
+
