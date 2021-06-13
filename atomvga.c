@@ -263,59 +263,19 @@ void __no_inline_not_in_flash_func(main_loop())
         // Get event from SM 0
         u_int32_t reg = pio_sm_get_blocking(pio, 0);
 
-        if ((reg & 0x100FF80) == 0xA00)
-        {
-            // Read in range 0A00 to 0A7F
-            pio_sm_put(pio, 1, 0xFF00 | memory[reg]);
-        }
-
-        // Get the address
-        u_int16_t address = reg & 0xFFFF;
-
-        // Is it a read or write opertaion?
-        if (!(reg & 0x1000000))
+        // Is it a read to the COL80 register?
+        if ((reg & (0x1000000 | COL80_MASK)) == COL80_BASE)
         {
             // read
-            if (address == COL80_STAT)
-            {
-                uint8_t b = 0x12;
-                pio_sm_put(pio, 1, 0xFF00 | b);
-            }
-            else if ((address & COL80_MASK) == COL80_BASE)
-            {
-                uint8_t b = memory[address];
-                pio_sm_put(pio, 1, 0xFF00 | b);
-            }
+            pio_sm_put(pio, 1, 0xFF00 | memory[reg]);
         }
-        else
+        else if (reg & 0x1000000)
         {
             // write
+            u_int16_t address = reg & 0xFFFF;
+
             u_int8_t data = (reg & 0xFF0000) >> 16;
             memory[address] = data;
-#if (PLATFORM == PLATFORM_DRAGON)
-            // Update SAM bits when written to
-            if ((address >= SAM_BASE) && (address <= SAM_END))
-            {
-                uint8_t     sam_data = GetSAMData(address);
-                uint16_t    sam_mask = GetSAMDataMask(address);
-
-                if (sam_data)
-                {
-                    SAMBits |= sam_mask;
-                }
-                else
-                {
-                    SAMBits &= ~sam_mask;
-                }
-            }
-#endif
-#if (PLATFORM == PLATFORM_ATOM)
-            // hack to reset the vga80x40 mode when BREAK is pressed
-            if (address == 0xb003 && data == 0x8a)
-            {
-                reset_vga80();
-            }
-#endif
         }
     }
 }
@@ -799,6 +759,7 @@ void reset_vga80()
     memory[COL80_BASE] = 0x00;  // Normal text mode (vga80 off)
     memory[COL80_FG] = 0xB2;    // Foreground Green
     memory[COL80_BG] = 0x00;    // Background Black
+    memory[COL80_STAT] = 0x12;  // GODIL version
 }
 
 void initialize_vga80()
