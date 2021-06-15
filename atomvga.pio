@@ -17,21 +17,19 @@
 
 .define tADDR 9                                         ; = 36us at 250MHz
 .side_set 3 opt
-    wait 1 GPIO PIN_1MHZ                                ; ensure SM starts at beginning of a clock cycle
+    wait 1 GPIO PIN_1MHZ                                ; start at beginning of clock cycle
 
 loop:
     wait 0 GPIO PIN_1MHZ [1]                            ; wait for clock 1 -> 0 
-
+    nop [1]
     set y tADDR             side ADDRESS_LOW
  delay1:
-    jmp y-- delay1          
+    jmp y-- delay1
 
     jmp PIN quick_read                                  ; *if* R_NW == 1 *then* the address is already valid
     wait 1 GPIO PIN_1MHZ                                ; *else* wait for clock 0 -> 1
-    in PINS 8               side ADDRESS_HIGH           ; read address 0-7
-    jmp PIN handle_read                                 ; test for read and select address 8-15
-    nop [1]                                             ; delay until 74lvc245 is ready
-    set y 1
+    in PINS 8 [1]           side ADDRESS_HIGH           ; read address 0-7
+    set y 1 [1]
     in PINS 8                                           ; read address 8-15
 
     wait 0 GPIO PIN_1MHZ    side DATA                   ; wait for clock 1 -> 0
@@ -40,14 +38,11 @@ loop:
     jmp loop
 
 quick_read:
-    in PINS 8               side ADDRESS_HIGH 
-handle_read:
+    in PINS 8 [1]           side ADDRESS_HIGH 
     nop [1]                                             ; delay until 74lvc245 is ready
-    nop
     in PINS 8                                           ; read address 8-15
     in NULL 16                                          ; pad with 0's
     wait 1 GPIO PIN_1MHZ 
-
     jmp loop
 
 % c-sdk {
