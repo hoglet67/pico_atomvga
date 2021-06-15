@@ -15,17 +15,19 @@
 .define ADDRESS_HIGH 0b101
 .define DATA 0b110
 
-//.define tSELECT 3   ; = 20nS at 150MHz
+.define tADDR 9                                         ; = 36us at 250MHz
 .side_set 3 opt
-    wait 0 GPIO PIN_1MHZ                                ; ensure SM starts at beginning of a bus cycle
-
+    wait 1 GPIO PIN_1MHZ                                ; start at beginning of clock cycle
 loop:
-    wait 1 GPIO PIN_1MHZ    side ADDRESS_LOW            ; wait for clock 0 -> 1
-
-    in PINS 8                                           ; read address 0-7
-    jmp PIN handle_read     side ADDRESS_HIGH           ; test for read and select address 8-15
-    nop [1]                                             ; delay until 74lvc245 is ready
+    wait 0 GPIO PIN_1MHZ [1]                            ; wait for clock 1 -> 0 
     nop [1]
+    set y tADDR             side ADDRESS_LOW
+ delay1:
+    jmp y-- delay1
+
+    jmp PIN quick_read                                  ; *if* R_NW == 1 *then* the address is already valid
+    wait 1 GPIO PIN_1MHZ                                ; *else* wait for clock 0 -> 1
+    in PINS 8 [1]           side ADDRESS_HIGH           ; read address 0-7
     set y 1 [1]
     in PINS 8                                           ; read address 8-15
 
@@ -34,20 +36,22 @@ loop:
     in y 8                                              ; 1 indicates 6502 write
     jmp loop
 
-handle_read:
+quick_read:
+    in PINS 8 [1]           side ADDRESS_HIGH 
     nop [1]                                             ; delay until 74lvc245 is ready
-    nop [1]
-    nop [1]
     in PINS 8                                           ; read address 8-15
     in NULL 16                                          ; pad with 0's
-    wait 0 GPIO PIN_1MHZ                                ; wait for clock 1 -> 0
-
+    wait 1 GPIO PIN_1MHZ 
     jmp loop
 
 % c-sdk {
 // this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
 
 void test_program_init(PIO pio, uint sm, uint offset) {
+   // Bypass the synchronizers to reduce latency when reading the
+   // address/data and R_NW pins.
+   pio->input_sync_bypass = (0xFF << test_PIN_A0) | (1 << test_PIN_R_NW);
+
    pio_sm_config c = test_program_get_default_config(offset);
    sm_config_set_jmp_pin 	(&c, test_PIN_R_NW);
    sm_config_set_in_pins(&c, test_PIN_A0);

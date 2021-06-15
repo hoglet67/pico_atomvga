@@ -8,9 +8,14 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
-
 #include "pico.h"
+
+#if (R65C02 == 1)
+#include "r65c02.pio.h"
+#else
 #include "atomvga.pio.h"
+#endif 
+
 #include "atomvga_out.pio.h"
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
@@ -24,7 +29,8 @@
 #include "platform.h"
 #if (PLATFORM == PLATFORM_DRAGON)
 #include "eeprom.h"
-#endif 
+#endif
+
 
 // PIA and frambuffer address moved into platform.h -- PHS
 
@@ -130,68 +136,8 @@ inline bool is_colour(uint mode)
     return !(mode & 0b10);
 };
 
-
-void pscreen()
-{
-    printf(CSI "H");
-    printf(CSI "?25l");
-    printf("+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - +\n");
-
-    for (int row = 0; row < 16; row++)
-    {
-        printf("|");
-        for (int col = 0; col < 32; col++)
-        {
-            unsigned char c = memory[row * 32 + col + GetVidMemBase()];
-            if (c < 0x80)
-            {
-                c = c ^ 0x60;
-            }
-            c = c - 0x20;
-            c = isprint(c) ? c : '.';
-            printf(" %c", c);
-        }
-        printf(" |\n");
-    }
-
-    printf("+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - +\n");
-    printf("MODE %x \n", get_mode());
-}
-
-#if 0
-// The IRQ handler is no longer used
-static void irq_handler()
-{
-    static int count = 0;
-    while (!pio_sm_is_rx_fifo_empty(pio, 0))
-    {
-        u_int32_t reg = pio_sm_get_blocking(pio, 0);
-        u_int16_t address = reg & 0xFFFF;
-        if (reg & 0x1000000)
-        {
-            if (address == COL80_BASE)
-            {
-                pio_sm_put(pio, 1, count++);
-            }
-        }
-        else
-        {
-            u_int8_t data = (reg & 0xFF0000) >> 16;
-            memory[address] = data;
-            if ((address >= GetVidMemBase() && address < GetVidMemBase() + 0x200) || address == PIA_ADDR)
-            {
-                updated = true;
-                gpio_put(LED_PIN, 1);
-            }
-        }
-    }
-}
-#endif
-
 const uint debug_text_len = 32;
-
 char debug_text[33];
-
 bool debug = false;
 
 void set_debug_text(char *text)
@@ -266,26 +212,6 @@ void update_debug_text()
     }
 }
 
-#if 0
-bool is_command(char *cmd)
-{
-    char *p = (char *)memory + 0xf000;
-    while (*cmd != 0)
-    {
-        if (*cmd++ != *p++)
-        {
-            return false;
-        }
-    }
-    if (*p == 0xD)
-    {
-        *p = 0;
-        return true;
-    }
-    return false;
-}
-#endif
-
 #if (PLATFORM == PLATFORM_ATOM)
 bool is_command(char *cmd,
                 char **params)
@@ -309,31 +235,23 @@ bool is_command(char *cmd,
     return false;
 }
 
-int uint8_param(char	*params,
-                uint8_t *output,
-                uint8_t min,
-                uint8_t max)
+bool uint8_param(char *params,
+                int *output,
+                int min,
+                int max)
 {
-    uint8_t try;
-    
-    while ((SPACE == *params) && (ATOM_EOL != *params))
+    int try;
+    if (sscanf(params, "%d", &try))
     {
-        params++;
-    }
-    
-    if(*params != ATOM_EOL)
-    {
-        if(sscanf(params,"%hhd",&try) == 1)
+        if ((try >= min) && (try <= max))
         {
-            if((try >= min) && (try <= max))
-            {
-                *output=try;
-                return 1;
-            }
+            *output = try;
+            return true;
         }
-    }        
-    return 0;
+    }
+    return false;
 }
+
 #endif
 
 void switch_font(uint8_t new_font)
@@ -360,6 +278,32 @@ void switch_colour(uint8_t          newcolour,
 
 volatile bool support_lower = false;
 
+#if (R65C02 == 1)
+void __no_inline_not_in_flash_func(main_loop())
+{
+    while (true)
+    {
+        // Get event from SM 0
+        u_int32_t reg = pio_sm_get_blocking(pio, 0);
+
+        // Is it a read to the COL80 I/O space?
+        if ((reg & (0x1000000 | COL80_MASK)) == COL80_BASE)
+        {
+            // read
+            pio_sm_put(pio, 1, 0xFF00 | memory[reg]);
+        }
+        else if (reg & 0x1000000)
+        {
+            // write
+            u_int16_t address = reg & 0xFFFF;
+
+            u_int8_t data = (reg & 0xFF0000) >> 16;
+            memory[address] = data;
+        }
+    }
+}
+#else
+
 void __no_inline_not_in_flash_func(main_loop())
 {
     static uint16_t    last = 0;
@@ -369,22 +313,21 @@ void __no_inline_not_in_flash_func(main_loop())
         // Get event from SM 0
         u_int32_t reg = pio_sm_get_blocking(pio, 0);
 
-        // Get the address
-        u_int16_t address = reg & 0xFFFF;
-
         // Is it a read or write opertaion?
-        if (reg & 0x1000000)
+        if (!(reg & 0x1000000))
         {
+            // Get the address
+            u_int16_t address = reg;
             // read
             if (address == COL80_STAT)
             {
                 uint8_t b = 0x12;
-                pio_sm_put(pio, 1, 0xFF | (b << 8));
+                pio_sm_put(pio, 1, 0xFF00 | b);
             }
             else if ((address & COL80_MASK) == COL80_BASE)
             {
                 uint8_t b = memory[address];
-                pio_sm_put(pio, 1, 0xFF | (b << 8));
+                pio_sm_put(pio, 1, 0xFF00 | b);
             }
 
             // Check for reset vector fetch, if so flag reset
@@ -396,6 +339,8 @@ void __no_inline_not_in_flash_func(main_loop())
         }
         else
         {
+            // Get the address
+            u_int16_t address = reg & 0xFFFF;
             // write
             u_int8_t data = (reg & 0xFF0000) >> 16;
             memory[address] = data;
@@ -440,19 +385,22 @@ void __no_inline_not_in_flash_func(main_loop())
         }
     }
 }
+#endif
+
+void print_str(int line_num, char* str)
+{
+    set_debug_text(str);
+    memcpy((char *)(memory + GetVidMemBase() + 0x020*line_num), debug_text, 32);
+}
 
 int main(void)
 {
-    uint sys_freq = 200000;
-    //uint sys_freq = 250000;
+    uint sys_freq = 250000;
     if (sys_freq > 250000)
     {
         vreg_set_voltage(VREG_VOLTAGE_1_25);
     }
     set_sys_clock_khz(sys_freq, true);
-    //setup_default_uart();
-
-    stdio_init_all();
 
     switch_font(DEFAULT_FONT);
 
@@ -465,6 +413,7 @@ int main(void)
     }
 #endif
     
+    memset(memory, 0, 0x10000);
     for (int i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
     {
         memory[i] = VDG_SPACE;
@@ -473,13 +422,14 @@ int main(void)
     char mess[32];
 
     // Display message and build date/time
-    set_debug_text(DEBUG_MESS);
-    memcpy((char *)(memory + GetVidMemBase() + 0x0140), debug_text, 32);
-    set_debug_text(__DATE__ " " __TIME__);
-    memcpy((char *)(memory + GetVidMemBase() + 0x0160), debug_text, 32);
-    snprintf(mess,32,"BASE=%04X, PIA=%04X, ",GetVidMemBase(),PIA_ADDR);
-    set_debug_text(mess);
-    memcpy((char *)(memory + GetVidMemBase()+0x180), debug_text, 32);
+    print_str(4, DEBUG_MESS);
+    print_str(5, __DATE__ " " __TIME__);
+    snprintf(mess, 32, "BASE=%04X, PIA=%04X", GetVidMemBase(), PIA_ADDR);
+    print_str(6, mess);
+#if (R65C02 == 1)
+    print_str(7, "R65C02 VERSION");
+#endif
+
 
     // create a semaphore to be posted when video init is complete
     sem_init(&video_initted, 0, 1);
@@ -507,7 +457,7 @@ int main(void)
 void check_command()
 {
     char    *params = (char *)NULL;
-    uint8_t temp;
+    int temp;
 
     if (is_command("DEBUG",&params))
     {
@@ -575,17 +525,6 @@ void check_command()
         memory[COL80_BASE] = COL80_ON;
         ClearCommand();
     }
-
-#if 0
-    else if (is_command("CHARSET1",params))
-    {
-        switch_font(FONT_GIME);
-    }
-    else if (is_command("CHARSET2",params))
-    {
-        switch_font(FONT_6847T1);
-    }
-#endif
 }
 #elif (PLATFORM == PLATFORM_DRAGON)
 
@@ -1043,6 +982,8 @@ void reset_vga80()
     memory[COL80_BASE] = COL80_OFF;     // Normal text mode (vga80 off)
     memory[COL80_FG] = 0xB2;            // Foreground Green
     memory[COL80_BG] = 0x00;            // Background Black
+    memory[COL80_STAT] = 0x12;
+    
 }
 
 void initialize_vga80()

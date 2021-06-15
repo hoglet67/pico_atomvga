@@ -36,6 +36,31 @@ pico_add_extra_outputs(atomvga)
 pico_enable_stdio_uart(atomvga 1)
 
 #
+# Atom R65C02 Build
+#
+
+add_executable(atomvga_r65c02
+  atomvga.c
+  )
+
+pico_generate_pio_header(atomvga_r65c02 ${CMAKE_CURRENT_LIST_DIR}/r65c02.pio)
+
+pico_generate_pio_header(atomvga_r65c02 ${CMAKE_CURRENT_LIST_DIR}/atomvga_out.pio)
+
+target_compile_definitions(atomvga_r65c02 PUBLIC -DPLATFORM=PLATFORM_ATOM -DPICO_SCANVIDEO_MAX_SCANLINE_BUFFER_WORDS=800 -DPICO_SCANVIDEO_SCANLINE_BUFFER_COUNT=16 -DR65C02=1)
+
+target_link_libraries(atomvga_r65c02 PRIVATE
+  pico_multicore
+  pico_stdlib
+  pico_scanvideo_dpi
+  hardware_pio
+  )
+
+pico_add_extra_outputs(atomvga_r65c02)
+
+pico_enable_stdio_uart(atomvga_r65c02 1)
+
+#
 # Dragon Build
 #
 
