@@ -77,17 +77,18 @@ in the locations from assembler.
 
 $FF80   Command port, see command list below.
         Valid commands are :
-        $00 Turn debug line off
-        $01 Turn debug line off
-        $02 Turn lowercase chars off
-        $03 Turn lowercase chars on
-        $04 Turn off artifact colours in pmode 4
-        $05 Turn on artifact colours set 1 in pmode 4
-        $06 Turn on artifact colours set 2 in pmode 4
-        $07 Save current settings to eeprom
-        $08 Load current settings from eeprom
-        $09 Disable automatic loading of settings from eprom at power on
-        $0A Enable automatic loading of settings from eprom at power on
+        $00 NOP
+        $01 Turn debug line on
+        $02 Turn debug line off
+        $03 Turn lowercase chars off
+        $04 Turn lowercase chars on
+        $05 Turn off artifact colours in pmode 4
+        $06 Turn on artifact colours set 1 in pmode 4
+        $07 Turn on artifact colours set 2 in pmode 4
+        $08 Save current settings to eeprom
+        $09 Load current settings from eeprom
+        $0A Disable automatic loading of settings from eprom at power on
+        $0B Enable automatic loading of settings from eprom at power on
 
 $FF81   Select font number :
         $00 Default 6847 font
@@ -122,3 +123,31 @@ $FF84   Text / SG alternate Foreground colour, used when CSS=1
         Colours as Background        
         Invalid values leave colour unchanged.
 
+$FF88   80 Column mode control.
+        Bit 
+        7 ($80) 80 column mode enabled  when set, normal VDG when clear
+        3 ($08) Attribute mode enabled when set disabled when clear
+
+$FF89   80 Coulmn mode foreground colour (text)
+        Note colours are different from normal VDG colours.....
+
+        BLACK   0
+        BLUE    1
+        GREEN   2
+        CYAN    3   
+        RED     4
+        MAGENTA 5
+        YELLOW  6
+        WHITE   7
+        
+$FF89   80 Coulmn mode background colour (text) see above.
+
+80 column mode has two sub modes: 
+1) Normal text where foreground and background mode are taken from the colours defined above, 
+   except for semigraphics characters which are coloured as normel.
+
+2) Attribute mode where the colours are taken from an attribute array in memort immediately 
+   following the character data (this has currently not been tested on the Dragon) 
+
+Please also note that Orange is not supported in 80 column mode, Orange semigraphics will be
+green instead.

@@ -413,7 +413,7 @@ int main(void)
     }
 #endif
     
-    memset(memory, 0, 0x10000);
+    memset((void *)memory, 0, 0x10000);
     for (int i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
     {
         memory[i] = VDG_SPACE;
@@ -567,13 +567,14 @@ void set_auto(uint8_t state)
 
 void check_command()
 {
-    static uint8_t oldcommand = 0;
+    static uint8_t oldcommand = DRAGON_CMD_NOP;
     uint8_t command = memory[DRAGON_CMD_ADDR];
 
     if(command != oldcommand)
     {
         switch (command)
         {
+            case DRAGON_CMD_NOP     : break;  
             case DRAGON_CMD_DEBUG   : debug = true; break;
             case DRAGON_CMD_NODEBUG : debug = false; break;
             case DRAGON_CMD_LOWER   : support_lower = true; break;
@@ -622,7 +623,11 @@ const uint max_height = 384;
 const uint vertical_offset = (vga_height - max_height) / 2;
 const uint horizontal_offset = (vga_width - max_width) / 2;
 
-const uint debug_start = max_height + vertical_offset;
+const uint debug_start = max_height + vertical_offset; 
+
+const uint vertical_offset80 = (vga_height - COL80_LINES) / 2;
+const uint vertical_max80    = vertical_offset80 + COL80_LINES; 
+
 
 uint16_t *add_border(uint16_t *p, uint16_t border_colour, uint16_t len)
 {
@@ -674,11 +679,11 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
     // Each char is 12 x 8 pixels
     // Note we divide ralative_line_number by 2 as we are double scanning each 6847 line to
     // 2 VGA lines.
-    uint row = (relative_line_num / 2) / 12;                // char row
-    uint sub_row = (relative_line_num / 2) % 12;            // scanline within current char row
-    uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();        // index into semigraphics table
-    uint rows_per_char  = 12 / sg_bytes_row[sgidx];         // bytes per character space vertically
-    uint8_t *fontdata = fonts[fontno].fontdata + sub_row;   // Local fontdata pointer
+    uint row = (relative_line_num / 2) / FONT_HEIGHT;           // char row
+    uint sub_row = (relative_line_num / 2) % FONT_HEIGHT;       // scanline within current char row
+    uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();            // index into semigraphics table
+    uint rows_per_char  = FONT_HEIGHT / sg_bytes_row[sgidx];    // bytes per character space vertically
+    uint8_t *fontdata = fonts[fontno].fontdata + sub_row;       // Local fontdata pointer
     
     if (row < 16)
     {
@@ -700,13 +705,13 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
             // alpha/semi bit.
             if(!as)
             {
-                uint8_t b = fontdata[(ch & 0x3f) * 12];
+                uint8_t b = fontdata[(ch & 0x3f) * FONT_HEIGHT];
 
                 fg_colour = alt_colour() ? ink_alt : ink;
 
                 if (support_lower && ch >= LOWER_START && ch <= max_lower)
                 {
-                    b = fontdata[((ch & 0x3f) + 64) * 12];
+                    b = fontdata[((ch & 0x3f) + 64) * FONT_HEIGHT];
 
                     if (LOWER_INVERT)
                     {
@@ -980,10 +985,9 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 void reset_vga80()
 {
     memory[COL80_BASE] = COL80_OFF;     // Normal text mode (vga80 off)
-    memory[COL80_FG] = 0xB2;            // Foreground Green
-    memory[COL80_BG] = 0x00;            // Background Black
+    memory[COL80_FG] = IDX80_GREEN;            // Foreground Green
+    memory[COL80_BG] = IDX80_BLACK;            // Background Black
     memory[COL80_STAT] = 0x12;
-    
 }
 
 void initialize_vga80()
@@ -997,7 +1001,7 @@ void initialize_vga80()
     //
     for (int i = 0; i < 128 * 4; i++)
     {
-        vga80_lut[i] = ((i & 1) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]) << 16;
+        vga80_lut[i]  = ((i & 1) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]) << 16;
         vga80_lut[i] |= ((i & 2) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]);
     }
 }
@@ -1006,19 +1010,21 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
 {
     // Screen is 80 columns by 40 rows
     // Each char is 12 x 8 pixels
-    uint row = relative_line_num / 12;
-    uint sub_row = relative_line_num % 12;
+    int row = relative_line_num / FONT_HEIGHT;
+    uint sub_row = relative_line_num % FONT_HEIGHT;
 
-    uint8_t *fd = fonts[fontno].fontdata + sub_row;
+    uint8_t *fontdata = fonts[fontno].fontdata + sub_row;
+    uint8_t *fontdata_sg = fontdata_sg4 + sub_row;
 
-    if (row < 40)
+    if (row < COL80_CLINES)
     {
-        // Compute the start address of the current row in the Atom framebuffer
+        // Compute the start address of the current row in the framebuffer
         volatile uint8_t *char_addr = memory + GetVidMemBase() + 80 * row;
 
         // Read the VGA80 control registers
-        uint vga80_ctrl1 = memory[COL80_FG];
-        uint vga80_ctrl2 = memory[COL80_BG];
+        uint vga80_fg = memory[COL80_FG];
+        uint vga80_bg = memory[COL80_BG];
+        uint vga80_base  = memory[COL80_BASE];
 
         *p++ = COMPOSABLE_RAW_RUN;
         *p++ = BLACK;       // Extra black pixel
@@ -1029,7 +1035,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
         // p is now on a word boundary due to the extra pixels above
         uint32_t *q = (uint32_t *)p;
 
-        if (vga80_ctrl1 & 0x08)
+        if (vga80_base & 0x08)
         {
             // Attribute mode enabled, attributes follow the characters in the frame buffer
             volatile uint8_t *attr_addr = char_addr + 80 * 40;
@@ -1060,7 +1066,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                     ch ^= 0x60;
 #endif                    
                     // Text
-                    uint8_t b = fd[(ch & 0x7f) * 12];
+                    uint8_t b = fontdata[(ch & 0x7f) * FONT_HEIGHT];
                     if (ch >= 0x80)
                     {
                         b = ~b;
@@ -1081,28 +1087,54 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
         else
         {
             // Attribute mode disabled, use default colours from the VGA80 control registers:
-            //   bits 2..0 of VGA80_CTRL1 (#BDE4) are the default foreground colour
-            //   bits 2..0 of VGA80_CTRL2 (#BDE5) are the default background colour
-            uint attr = ((vga80_ctrl2 & 7) << 4) | (vga80_ctrl1 & 7);
+            //   bits 2..0 of vga80_fg (#BDE4) are the default foreground colour
+            //   bits 2..0 of vga80_bg (#BDE5) are the default background colour
+            uint attr = ((vga80_bg & 7) << 4) | (vga80_fg & 7);
             uint32_t *vp = vga80_lut + (attr << 2);
+            uint8_t pixels;
+
             for (int col = 0; col < 80; col++)
             {
-                uint ch     = *char_addr++;
+                uint8_t ch     = *char_addr++;
+                // Get inverse and alpha/semi bits from char
                 bool inv    = (ch & INV_MASK) ? true : false;
-            
-#if (PLATFORM == PLATFORM_DRAGON)
-                ch ^= 0x40;
-#endif                    
-                uint8_t b = fd[(ch & 0x7f) * 12];
-                if (inv)
+                bool as     = (ch & AS_MASK) ? true : false;
+
+                // determine fg colour based on defaults if ASCII 
+                // else based on character if semigraphics, pull
+                // pixel data out of font
+                if (!as) // ASCII
                 {
-                    b = ~b;
+                    attr = ((vga80_bg & 7) << 4) | (vga80_fg & 7);
+                    pixels = fontdata[(ch & 0x3f) * FONT_HEIGHT];            
+
+                    // Deal with lower case / invert
+                    if (support_lower && ch >= LOWER_START && ch <= max_lower)
+                    {
+                        pixels = fontdata[((ch & 0x3f) + 64) * FONT_HEIGHT];
+
+                        if (LOWER_INVERT)
+                        {
+                            pixels = ~pixels;
+                        }
+                    }
+                    else if (inv)
+                    {
+                        pixels = ~pixels;
+                    }
                 }
+                else // Semigraphics
+                {
+                    attr = ((vga80_bg & 7) << 4) | vdgpal_to_80colpal[(ch & SG4_COL_MASK) >> SG4_COL_SHIFT];
+                    pixels = fontdata_sg[(ch & SG4_PAT_MASK) * FONT_HEIGHT];
+                }
+                vp = (vga80_lut + (attr << 2));
+                
                 // Unroll the writing of the four pixel pairs
-                *q++ = *(vp + ((b >> 6) & 3));
-                *q++ = *(vp + ((b >> 4) & 3));
-                *q++ = *(vp + ((b >> 2) & 3));
-                *q++ = *(vp + ((b >> 0) & 3));
+                *q++ = *(vp + ((pixels >> 6) & 3));
+                *q++ = *(vp + ((pixels >> 4) & 3));
+                *q++ = *(vp + ((pixels >> 2) & 3));
+                *q++ = *(vp + ((pixels >> 0) & 3));
             }
         }
     }
@@ -1113,8 +1145,17 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
 void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
 {
     const uint line_num = scanvideo_scanline_number(buffer->scanline_id);
-
-    uint16_t *p = do_text_vga80(buffer, line_num, (uint16_t *)buffer->data);
+    uint16_t border_colour = 0;
+    uint16_t *p = (uint16_t *)buffer->data;
+    
+    if ((line_num < vertical_offset80) || (line_num > vertical_max80))
+    {
+        p = add_border(p, border_colour, vga_width);
+    }
+    else
+    {
+        p = do_text_vga80(buffer, line_num - vertical_offset80, p);
+    }
 
     if (line_num == 0)
     {

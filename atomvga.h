@@ -1,17 +1,19 @@
 #ifndef ATOMVGA_H_
 #define ATOMVGA_H_
 
-#define RED_1 0x0400
-#define RED_2 0x0800
-#define RED 0x0C00
+// Changed scanvideo setup so colour bits are in LSB of word
 
-#define GREEN_1 0x1000
-#define GREEN_2 0x2000
-#define GREEN 0x3000
+#define RED_1 0x0001
+#define RED_2 0x0002
+#define RED (RED_2 | RED_1)
 
-#define BLUE_1 0x4000
-#define BLUE_2 0x8000
-#define BLUE 0xC000
+#define GREEN_1 0x0004
+#define GREEN_2 0x0008
+#define GREEN (GREEN_2 | GREEN_1)
+
+#define BLUE_1 0x0010
+#define BLUE_2 0x0020
+#define BLUE (BLUE_2 | BLUE_1)
 
 #define BLACK 0
 #define YELLOW (RED | GREEN)
@@ -65,12 +67,38 @@ uint16_t colour_palette_vga80[8] = {
     WHITE
 };
 
+#define IDX80_GREEN   2
+#define IDX80_YELLOW  6
+#define IDX80_BLUE    1
+#define IDX80_RED     4
+#define IDX80_WHITE   7
+#define IDX80_CYAN    3   
+#define IDX80_MAGENTA 5
+#define IDX80_ORANGE  IDX80_GREEN
+#define IDX80_BLACK   0
+
+// Ordered in vdg pallete order translates vdg->80 col pallete.
+uint8_t vdgpal_to_80colpal [NO_COLOURS] = {
+        IDX80_GREEN,
+        IDX80_YELLOW,
+        IDX80_BLUE,
+        IDX80_RED,
+        IDX80_WHITE,
+        IDX80_CYAN,
+        IDX80_MAGENTA,
+        IDX80_ORANGE,
+        IDX80_BLACK
+}; 
+
+
+#if 0
 uint16_t colour_palette_improved[4] = {
     BLACK,
     YELLOW,
     GREEN,
     MAGENTA,
 };
+#endif 
 
 uint16_t colour_palette_artifact1[4] = {
     BLACK,
