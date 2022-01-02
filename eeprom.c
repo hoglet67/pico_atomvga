@@ -4,17 +4,30 @@
 */
 
 #include "eeprom.h"
+#include <stdbool.h>
+
+static bool ee_init;
+
+void ee_at_reset(void)
+{
+    ee_init=false;
+}
 
 // Initialize IIC pins ready for eeprom
 void init_ee(void)
 {
-    // I2C Initialisation. Using it at 400Khz.
-    i2c_init(I2C_PORT, 400*1000);
+    if(!ee_init)
+    {
+        // I2C Initialisation. Using it at 400Khz.
+        i2c_init(I2C_PORT, 400*1000);
     
-    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(I2C_SDA);
-    gpio_pull_up(I2C_SCL);
+        gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+        gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+        gpio_pull_up(I2C_SDA);
+        gpio_pull_up(I2C_SCL);
+
+        ee_init=true;
+    }
 }
 
 // Read a byte from eeprom
@@ -25,6 +38,9 @@ int read_ee(uint        iic_addr,       // IIC address
 {
     uint8_t from = (ee_addr & 0x00FF);
     int     result;
+
+    // Initialize i2c bus and eeprom, if not already initialized 
+    init_ee();
 
     // Send the read command along with the address to read
     result = i2c_write_blocking(i2c0,iic_addr,&from,1,true);
@@ -68,6 +84,9 @@ int write_ee(uint       iic_addr,       // IIC address
     uint8_t wrbuf[2];
 
     int     retries;
+
+    // Initialize i2c bus and eeprom, if not already initialized 
+    init_ee();
 
     // 2 byte write buffer containing address to write and data to write
     wrbuf[0] = ee_addr & 0x00FF;

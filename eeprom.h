@@ -21,6 +21,9 @@
 // Address
 #define EE_ADDRESS  0x50
 
+// call this at reset.
+void ee_at_reset(void);
+
 // Initialize IIC pins ready for eeprom
 void init_ee(void);
 

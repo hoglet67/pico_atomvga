@@ -29,6 +29,14 @@
 #define COL80_STAT  0xBDEF
 #define COL80_MASK  0xFFF0
 
+// Character lines / screen for 80 col.
+#define COL80_CLINES  30
+
+// Pixel lines / screen for 80 col.
+#define COL80_LINES   (COL80_CLINES * 12)
+
+#define STATUS_ADDR 0xBDEE
+
 // Macros to get VDU memory base
 #define GetVidMemBase() FB_ADDR
 #define GetVidMemEnd()  (FB_ADDR+VID_MEM_SIZE)
@@ -80,7 +88,13 @@
 #define COL80_STAT  0xFF8B
 #define COL80_MASK  0xFFF8
 
-volatile uint16_t    SAMBits;
+// Character lines / screen for 80 col.
+#define COL80_CLINES  30
+
+// Pixel lines / screen for 80 col.
+#define COL80_LINES   (COL80_CLINES * 12)
+
+volatile uint16_t       SAMBits;
 
 #define SAM_BASE        0xFFC0
 #define SAM_END         0xFFDF
@@ -121,13 +135,17 @@ volatile uint16_t    SAMBits;
 
 #define GetIntExt(ch)   (memory[PIA_ADDR] & INTEXT_MASK) ? true : false;
 
+// read locations
+#define STATUS_ADDR         0xFF80
+
+// Write locations
 #define DRAGON_CMD_ADDR     0xFF80
 #define DRAGON_FONTNO_ADDR  0xFF81
 #define DRAGON_INK_ADDR     0xFF82
 #define DRAGON_PAPER_ADDR   0xFF83
 #define DRAGON_INKALT_ADDR  0xFF84
-
-#define DRAGON_CMD_NONE     0x00
+    
+#define DRAGON_CMD_NOP      0x00
 #define DRAGON_CMD_DEBUG    0x01
 #define DRAGON_CMD_NODEBUG  0x02
 #define DRAGON_CMD_LOWER    0x03
@@ -155,7 +173,7 @@ volatile uint16_t    SAMBits;
 #define EE_INK        0x02
 #define EE_PAPER      0x04
 #define EE_INK_ALT    0x08
-#define EE_ISLOWER    0x0A
+#define EE_STATUS     0x0A
 
 #define AUTO_ON       0x01
 #define AUTO_OFF      0x00
