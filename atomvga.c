@@ -61,6 +61,9 @@ volatile uint8_t artifact = 0;
 
 volatile bool reset_flag = false;
 
+volatile uint8_t status = STATUS_NONE;
+#define status_set(mask)    ((status & mask) ? true : false)
+
 // Initialise the GPIO pins - overrides whatever the scanvideo library did
 static void initialiseIO()
 {
@@ -127,7 +130,7 @@ inline bool alt_colour()
 
 inline bool is_artifact(uint mode)
 {
-    return ((0 != artifact) && (0x0F == mode)) ? true : false;
+    return (((0 != (status & STATUS_ARTI_MASK))) && (0x0F == mode)) ? true : false;
 }
 
 // Treat artifacted pmode 4 as pmode 3 with a different palette
@@ -138,7 +141,7 @@ inline bool is_colour(uint mode)
 
 const uint debug_text_len = 32;
 char debug_text[33];
-bool debug = false;
+//bool debug = false;
 
 void set_debug_text(char *text)
 {
@@ -177,7 +180,7 @@ void set_debug_text(char *text)
 
 void update_debug_text()
 {
-    if (debug)
+    if (status_set(STATUS_DEBUG))
     {
         char buffer[DEBUG_BUF_SIZE];
         uint mode = get_mode();
@@ -202,7 +205,7 @@ void update_debug_text()
                 is_colour(mode) ? "col" : "b&w",
                 bytes,
                 SAMBits,
-                artifact);
+                (status & STATUS_ARTI_MASK));
 #endif
         set_debug_text(buffer);
     }
@@ -210,6 +213,12 @@ void update_debug_text()
     {
         set_debug_text("");
     }
+}
+
+inline void status_sc(bool      state,
+                      uint8_t   bits)
+{
+    status = state ? (status | bits) : (status & ~bits); 
 }
 
 #if (PLATFORM == PLATFORM_ATOM)
@@ -276,7 +285,7 @@ void switch_colour(uint8_t          newcolour,
     }
 }
 
-volatile bool support_lower = false;
+//volatile bool support_lower = false;
 
 #if (R65C02 == 1)
 void __no_inline_not_in_flash_func(main_loop())
@@ -328,6 +337,10 @@ void __no_inline_not_in_flash_func(main_loop())
             {
                 uint8_t b = memory[address];
                 pio_sm_put(pio, 1, 0xFF00 | b);
+            } 
+            else if (address == STATUS_ADDR)
+            {
+                pio_sm_put(pio, 1, 0xFF00 | status);
             }
 
             // Check for reset vector fetch, if so flag reset
@@ -406,14 +419,7 @@ int main(void)
 
 #if (PLATFORM == PLATFORM_DRAGON)
     ee_at_reset();
-//#if 0
-//    init_ee();
-    read_ee(EE_ADDRESS,EE_AUTOLOAD,(uint8_t *)&autoload);
-    if(AUTO_ON == autoload)
-    {
-        load_ee();
-    }
-//#endif
+    load_ee();
 #endif
 
     memset((void *)memory, VDG_SPACE, 0x10000);
@@ -459,22 +465,22 @@ void check_command()
 
     if (is_command("DEBUG",&params))
     {
-        debug = true;
+        status_sc(true,STATUS_DEBUG);
         ClearCommand();
     }
     else if (is_command("NODEBUG",&params))
     {
-        debug = false;
+        status_sc(false,STATUS_DEBUG);
         ClearCommand();
     }
     else if (is_command("LOWER",&params))
     {
-        support_lower = true;
+        status_sc(true,STATUS_LOWER);
         ClearCommand();
     }
     else if (is_command("NOLOWER",&params))
     {
-        support_lower = false;
+        status_sc(true,STATUS_LOWER);
         ClearCommand();
     }
     else if (is_command("CHARSET",&params))
@@ -514,12 +520,20 @@ void check_command()
     {
         if (uint8_param(params,&temp,0,2))
         {
-            artifact = temp;
+            status_sc(false,STATUS_ARTI_MASK); 
+            
+            switch (temp)
+            {
+                case 1  : status_sc(true,STATUS_ARTI1); break;
+                case 2  : status_sc(true,STATUS_ARTI2); break;
+            }
         }
         ClearCommand();
     }
     else if (is_command("80COL",&params))
     {
+        status_sc(true,STATUS_80COL);
+
         memory[COL80_BASE] = COL80_ON;
         ClearCommand();
     }
@@ -534,15 +548,16 @@ void save_ee(void)
         write_ee_bytes(EE_ADDRESS,EE_INK,(uint8_t *)&ink,sizeof(ink));
         write_ee_bytes(EE_ADDRESS,EE_PAPER,(uint8_t *)&paper,sizeof(paper));
         write_ee_bytes(EE_ADDRESS,EE_INK_ALT,(uint8_t *)&ink_alt,sizeof(ink_alt));
-        write_ee(EE_ADDRESS,EE_ISLOWER,support_lower);
+        write_ee(EE_ADDRESS,EE_STATUS,status);
 
-        printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, lower=%d\n",fontno,ink,paper,ink_alt,support_lower);
+        printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, status=%02X\n",fontno,ink,paper,ink_alt,status);
     }
 }
 
 void load_ee(void)
 {
     uint8_t tempb;
+    uint8_t autoload;
 
     if(0 <= read_ee(EE_ADDRESS,EE_AUTOLOAD,(uint8_t *)&autoload))
     {
@@ -552,14 +567,19 @@ void load_ee(void)
         read_ee_bytes(EE_ADDRESS,EE_INK,(uint8_t *)&ink,sizeof(ink));
         read_ee_bytes(EE_ADDRESS,EE_PAPER,(uint8_t *)&paper,sizeof(paper));
         read_ee_bytes(EE_ADDRESS,EE_INK_ALT,(uint8_t *)&ink_alt,sizeof(ink_alt));
-        read_ee(EE_ADDRESS,EE_ISLOWER,(uint8_t *)&support_lower);
+        read_ee(EE_ADDRESS,EE_STATUS,(uint8_t *)&status);
+        
+        // clear 80 col bit.
+        status_sc(false,STATUS_80COL);
 
-        printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, lower=%d\n",fontno,ink,paper,ink_alt,support_lower);
+        printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, status=%02X\n",fontno,ink,paper,ink_alt,status);
     }
 }
 
 void set_auto(uint8_t state)
 {
+    status_sc(state, STATUS_AUTO);
+
     write_ee(EE_ADDRESS,EE_AUTOLOAD,state);
 }
 
@@ -573,13 +593,13 @@ void check_command()
         switch (command)
         {
             case DRAGON_CMD_NOP     : break;  
-            case DRAGON_CMD_DEBUG   : debug = true; break;
-            case DRAGON_CMD_NODEBUG : debug = false; break;
-            case DRAGON_CMD_LOWER   : support_lower = true; break;
-            case DRAGON_CMD_NOLOWER : support_lower = false; break;
-            case DRAGON_CMD_ARTIOFF : artifact = 0; break;
-            case DRAGON_CMD_ARTI1   : artifact = 1; break;
-            case DRAGON_CMD_ARTI2   : artifact = 2; break;
+            case DRAGON_CMD_DEBUG   : status_sc(true,STATUS_DEBUG); break;
+            case DRAGON_CMD_NODEBUG : status_sc(false,STATUS_DEBUG); break;
+            case DRAGON_CMD_LOWER   : status_sc(true,STATUS_LOWER); break;
+            case DRAGON_CMD_NOLOWER : status_sc(false,STATUS_LOWER); break;
+            case DRAGON_CMD_ARTIOFF : status_sc(false,STATUS_ARTI_MASK); break;
+            case DRAGON_CMD_ARTI1   : status_sc(false,STATUS_ARTI_MASK); status_sc(true,STATUS_ARTI1); break;
+            case DRAGON_CMD_ARTI2   : status_sc(false,STATUS_ARTI_MASK); status_sc(true,STATUS_ARTI2); break;
             case DRAGON_CMD_SAVEEE  : save_ee(); break;
             case DRAGON_CMD_LOADEE  : load_ee(); break;
             case DRAGON_CMD_AUTOOFF : set_auto(AUTO_OFF); break;
@@ -588,6 +608,8 @@ void check_command()
 
         oldcommand=command;
     }
+    // Update 80 column status.
+    status_sc((memory[COL80_BASE] & COL80_ON),STATUS_80COL);
 }
 #endif
 
@@ -707,7 +729,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
 
                 fg_colour = alt_colour() ? ink_alt : ink;
 
-                if (support_lower && ch >= LOWER_START && ch <= max_lower)
+                if (status_set(STATUS_LOWER) && ch >= LOWER_START && ch <= max_lower)
                 {
                     b = fontdata[((ch & 0x3f) + 64) * FONT_HEIGHT];
 
@@ -803,7 +825,7 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
     // Graphics modes have a coloured border, text modes have a black border
     uint16_t border_colour = (mode & 1) ? palette[0] : 0;
-    uint debug_end = debug ? debug_start + 24 : debug_start;
+    uint debug_end = status_set(STATUS_DEBUG) ? debug_start + 24 : debug_start;
 
     if (relative_line_num < 0 || line_num >= debug_end)
     {
@@ -1107,7 +1129,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                     pixels = fontdata[(ch & 0x3f) * FONT_HEIGHT];            
 
                     // Deal with lower case / invert
-                    if (support_lower && ch >= LOWER_START && ch <= max_lower)
+                    if (status_set(STATUS_LOWER) && ch >= LOWER_START && ch <= max_lower)
                     {
                         pixels = fontdata[((ch & 0x3f) + 64) * FONT_HEIGHT];
 

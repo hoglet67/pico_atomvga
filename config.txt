@@ -72,6 +72,19 @@ ARTI dd
 
 DragonVGA port assignments and meanings:
 
+These can be read with a PEEK command from BASIC or by loading the value 
+from the locations from assembler.
+
+$FF80 Status port, bit coded :
+        $01 Artifact set 1 enabled
+        $02 Artifact set 2 enabled
+        $04 Debug line enabled
+        $08 Lowercase enabled (if font supports it)
+        $10 Auto load of settings at startup enabled
+        $20 80 column mode enabled, not saved to eeprom
+        $40 Reserved
+        $80 Reserved
+
 These can be set with a POKE command from BASIC or by storing the value 
 in the locations from assembler.
 
@@ -140,13 +153,13 @@ $FF89   80 Coulmn mode foreground colour (text)
         YELLOW  6
         WHITE   7
         
-$FF89   80 Coulmn mode background colour (text) see above.
+$FF8A   80 Coulmn mode background colour (text) see above.
 
 80 column mode has two sub modes: 
 1) Normal text where foreground and background mode are taken from the colours defined above, 
    except for semigraphics characters which are coloured as normel.
 
-2) Attribute mode where the colours are taken from an attribute array in memort immediately 
+2) Attribute mode where the colours are taken from an attribute array in memory immediately 
    following the character data (this has currently not been tested on the Dragon) 
 
 Please also note that Orange is not supported in 80 column mode, Orange semigraphics will be

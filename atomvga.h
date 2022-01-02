@@ -167,4 +167,19 @@ uint bytes_per_row(uint mode)
 #define COL80_ON    0x80
 #define COL80_ATTR  0x08
 
+
+// Status bits
+#define STATUS_NONE     0x00
+#define STATUS_ARTI1    0x01
+#define STATUS_ARTI2    0x02
+#define STATUS_DEBUG    0x04
+#define STATUS_LOWER    0x08
+#define STATUS_AUTO     0x10
+#define STATUS_80COL    0x20
+
+#define STATUS_ARTI_MASK    0x03
+
+#define get_artifact()  (status & STATUS_ARTI_MASK)
+
+
 #endif /* ATOMVGA_H_ */
