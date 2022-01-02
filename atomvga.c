@@ -405,19 +405,18 @@ int main(void)
     switch_font(DEFAULT_FONT);
 
 #if (PLATFORM == PLATFORM_DRAGON)
-    init_ee();
+    ee_at_reset();
+//#if 0
+//    init_ee();
     read_ee(EE_ADDRESS,EE_AUTOLOAD,(uint8_t *)&autoload);
     if(AUTO_ON == autoload)
     {
         load_ee();
     }
+//#endif
 #endif
-    
-    memset((void *)memory, 0, 0x10000);
-    for (int i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
-    {
-        memory[i] = VDG_SPACE;
-    }
+
+    memset((void *)memory, VDG_SPACE, 0x10000);
 
     char mess[32];
 
@@ -429,7 +428,6 @@ int main(void)
 #if (R65C02 == 1)
     print_str(7, "R65C02 VERSION");
 #endif
-
 
     // create a semaphore to be posted when video init is complete
     sem_init(&video_initted, 0, 1);

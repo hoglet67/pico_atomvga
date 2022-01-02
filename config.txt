@@ -80,8 +80,8 @@ $FF80   Command port, see command list below.
         $00 NOP
         $01 Turn debug line on
         $02 Turn debug line off
-        $03 Turn lowercase chars off
-        $04 Turn lowercase chars on
+        $03 Turn lowercase chars on 
+        $04 Turn lowercase chars off
         $05 Turn off artifact colours in pmode 4
         $06 Turn on artifact colours set 1 in pmode 4
         $07 Turn on artifact colours set 2 in pmode 4
