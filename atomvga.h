@@ -165,6 +165,7 @@ uint bytes_per_row(uint mode)
 
 #define COL80_OFF   0x00
 #define COL80_ON    0x80
+#define COL40_ON    0x40
 #define COL80_ATTR  0x08
 
 

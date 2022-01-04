@@ -47,6 +47,7 @@ static PIO pio = pio1;
 //static uint8_t *fontdata = fontdata_6847;
 
 static uint32_t vga80_lut[128 * 4];
+static uint16_t pix8to16[256];
 
 volatile uint8_t fontno = DEFAULT_FONT;
 volatile uint8_t max_lower = LOWER_END;
@@ -1010,6 +1011,21 @@ void reset_vga80()
     memory[COL80_STAT] = 0x12;
 }
 
+uint16_t double_bits(uint8_t    inbits)
+{
+    uint16_t result = 0;
+    uint8_t  inmask = 0x01;
+    uint16_t outmask = 0x0003;
+
+    for(inmask = 0x01; inmask!=0; inmask = inmask << 1)
+    {
+        result = (inbits & inmask) ? result | outmask : result;
+        outmask = outmask << 2;
+    }
+
+    return result;
+}
+
 void initialize_vga80()
 {
     // Reset the VGA80 hardware
@@ -1024,6 +1040,22 @@ void initialize_vga80()
         vga80_lut[i]  = ((i & 1) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]) << 16;
         vga80_lut[i] |= ((i & 2) ? colour_palette_vga80[(i >> 2) & 7] : colour_palette_vga80[(i >> 6) & 7]);
     }
+
+    for (int i=0; i<256; i++)
+    {
+        pix8to16[i]=double_bits(i);
+    }
+}
+
+static inline uint32_t *begin_row80(uint16_t *data,
+                                    uint32_t pixels)
+{
+    *data++ = COMPOSABLE_RAW_RUN;
+    *data++ = (uint16_t) (pixels & 0x0000FFFF);
+    *data++ = (uint16_t) 640 - 3;
+    *data++ = (uint16_t) (pixels >> 16);
+    
+    return (uint32_t *)data;
 }
 
 uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, uint16_t *p)
@@ -1036,21 +1068,24 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
     uint8_t *fontdata = fonts[fontno].fontdata + sub_row;
     uint8_t *fontdata_sg = fontdata_sg4 + sub_row;
 
+    uint8_t cols = (memory[COL80_BASE] & COL40_ON) ? 40 : 80;
+
     if (row < COL80_CLINES)
     {
         // Compute the start address of the current row in the framebuffer
-        volatile uint8_t *char_addr = memory + GetVidMemBase() + 80 * row;
+        volatile uint8_t *char_addr = memory + GetVidMemBase() + cols * row;
 
         // Read the VGA80 control registers
         uint vga80_fg = memory[COL80_FG];
         uint vga80_bg = memory[COL80_BG];
         uint vga80_base  = memory[COL80_BASE];
 
+# if 0
         *p++ = COMPOSABLE_RAW_RUN;
         *p++ = BLACK;       // Extra black pixel
         *p++ = 642 - 3;     //
         *p++ = BLACK;       // Extra black pixel
-
+#endif
         // For efficiency, compute two pixels at a time using a lookup table
         // p is now on a word boundary due to the extra pixels above
         uint32_t *q = (uint32_t *)p;
@@ -1075,7 +1110,14 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                     uint32_t p1 = (ch & smask1) ? *(vp + 3) : *vp;
                     uint32_t p0 = (ch & smask0) ? *(vp + 3) : *vp;
                     // Unroll the writing of the four pixel pairs
-                    *q++ = p1;
+                    if (0 == col)
+                    {
+                        q=begin_row80(p,p1);
+                    }
+                    else
+                    {
+                        *q++ = p1;        
+                    }
                     *q++ = p1;
                     *q++ = p0;
                     *q++ = p0;
@@ -1097,7 +1139,14 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                         b |= ulmask;
                     }
                     // Unroll the writing of the four pixel pairs
-                    *q++ = *(vp + ((b >> 6) & 3));
+                    if (0 == col)
+                    {
+                        q=begin_row80(p,*(vp + ((b >> 6) & 3)));        
+                    }
+                    else
+                    {
+                        *q++ = *(vp + ((b >> 6) & 3));
+                    }
                     *q++ = *(vp + ((b >> 4) & 3));
                     *q++ = *(vp + ((b >> 2) & 3));
                     *q++ = *(vp + ((b >> 0) & 3));
@@ -1113,7 +1162,7 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
             uint32_t *vp = vga80_lut + (attr << 2);
             uint8_t pixels;
 
-            for (int col = 0; col < 80; col++)
+            for (int col = 0; col < cols; col++)
             {
                 uint8_t ch     = *char_addr++;
                 // Get inverse and alpha/semi bits from char
@@ -1150,16 +1199,51 @@ uint16_t *do_text_vga80(scanvideo_scanline_buffer_t *buffer, uint relative_line_
                 }
                 vp = (vga80_lut + (attr << 2));
                 
-                // Unroll the writing of the four pixel pairs
-                *q++ = *(vp + ((pixels >> 6) & 3));
-                *q++ = *(vp + ((pixels >> 4) & 3));
-                *q++ = *(vp + ((pixels >> 2) & 3));
-                *q++ = *(vp + ((pixels >> 0) & 3));
+                if (80 == cols)
+                {
+                    // Unroll the writing of the four pixel pairs
+                    if (0 == col)
+                    {
+                        q=begin_row80(p,*(vp + ((pixels >> 6) & 3)));
+                    }
+                    else
+                    {
+                        *q++ = *(vp + ((pixels >> 6) & 3));                    
+                    }
+                    *q++ = *(vp + ((pixels >> 4) & 3));
+                    *q++ = *(vp + ((pixels >> 2) & 3));
+                    *q++ = *(vp + ((pixels >> 0) & 3));
+                }
+                else // 40 column mode, write each twice....
+                {
+                    uint16_t pixels16 = pix8to16[pixels];
+
+                    // Unroll the writing of the four pixel pairs
+                    if (0 == col)
+                    {
+                        q=begin_row80(p,*(vp + ((pixels16 >> 14) & 3)));
+                    }
+                    else
+                    {
+                        *q++ = *(vp + ((pixels16 >> 14) & 3));
+                    }
+                    *q++ = *(vp + ((pixels16 >> 12) & 3));
+                    *q++ = *(vp + ((pixels16 >> 10) & 3));
+                    *q++ = *(vp + ((pixels16 >> 8) & 3));
+                    *q++ = *(vp + ((pixels16 >> 6) & 3));
+                    *q++ = *(vp + ((pixels16 >> 4) & 3));
+                    *q++ = *(vp + ((pixels16 >> 2) & 3));
+                    *q++ = *(vp + ((pixels16 >> 0) & 3));
+                }
             }
         }
     }
+    // The above loops add 80 x 4 = 320 32-bit words, which is 640 16-bit words plus 4 further 16 bit words for the COMPOSABLE_RAW_1P_SKIP_ALIGN,0 and COMPOSABLE_RAW_RUN, RL at line start
+    return p + 640 + 2;
+#if 0
     // The above loops add 80 x 4 = 320 32-bit words, which is 640 16-bit words
     return p + 640;
+#endif
 }
 
 void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
@@ -1214,7 +1298,7 @@ void core1_func()
     sem_release(&video_initted);
     while (true)
     {
-        uint vga80 = memory[COL80_BASE] & COL80_ON;
+        uint vga80 = memory[COL80_BASE] & (COL80_ON | COL40_ON);
         scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
         if (vga80)
         {
