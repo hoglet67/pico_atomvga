@@ -144,7 +144,9 @@ volatile uint16_t       SAMBits;
 #define DRAGON_INK_ADDR     0xFF82
 #define DRAGON_PAPER_ADDR   0xFF83
 #define DRAGON_INKALT_ADDR  0xFF84
-    
+#define DRAGON_BORDER_ADDR  0xFF85
+#define DRAGON_PALETTE_ADDR 0xFF86
+
 #define DRAGON_CMD_NOP      0x00
 #define DRAGON_CMD_DEBUG    0x01
 #define DRAGON_CMD_NODEBUG  0x02
@@ -174,6 +176,16 @@ volatile uint16_t       SAMBits;
 #define EE_PAPER      0x04
 #define EE_INK_ALT    0x08
 #define EE_STATUS     0x0A
+#define EE_BORDER     0x0B
+#define EE_COLOUR0    0x0D
+#define EE_COLOUR1    0x0F
+#define EE_COLOUR2    0x12
+#define EE_COLOUR3    0x14
+#define EE_COLOUR4    0x18
+#define EE_COLOUR5    0x1A
+#define EE_COLOUR6    0x1C
+#define EE_COLOUR7    0x1E
+#define EE_COLOUR8    0x20
 
 #define AUTO_ON       0x01
 #define AUTO_OFF      0x00

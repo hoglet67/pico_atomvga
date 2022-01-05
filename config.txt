@@ -82,7 +82,7 @@ $FF80 Status port, bit coded :
         $08 Lowercase enabled (if font supports it)
         $10 Auto load of settings at startup enabled
         $20 80 column mode enabled, not saved to eeprom
-        $40 Reserved
+        $40 Non default boarder colour set
         $80 Reserved
 
 These can be set with a POKE command from BASIC or by storing the value 
@@ -135,6 +135,18 @@ $FF83   Text / SG Foreground colour used when CSS=0
 $FF84   Text / SG alternate Foreground colour, used when CSS=1
         Colours as Background        
         Invalid values leave colour unchanged.
+
+$FF85   Border colour - works across all modes.
+        $00 - $08 (as above)
+        $FF - return to default behaviour (black for text, white / green for graphics)
+
+$FF86   Change the colour in one slot of the palette. Uses a single byte as follows:
+
+        Swap colours 4 and 8 - white becomes black, black becomes white
+        POKE &HFF86,&H48 (colour slot 4 becomes black)
+        POKE &HFF86,&H84 (colour slot 8 becomes white)
+
+        $FF returns to the defaults
 
 $FF88   80 Column mode control.
         Bit 

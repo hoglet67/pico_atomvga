@@ -39,6 +39,18 @@ uint16_t colour_palette_atom[NO_COLOURS] = {
     BLACK
 };
 
+uint16_t colour_palette_default[NO_COLOURS] = {
+    GREEN,
+    YELLOW,
+    BLUE,
+    RED,
+    WHITE,
+    CYAN,
+    MAGENTA,
+    ORANGE,
+    BLACK
+};
+
 #define IDX_GREEN   0
 #define IDX_YELLOW  1
 #define IDX_BLUE    2
@@ -50,6 +62,9 @@ uint16_t colour_palette_atom[NO_COLOURS] = {
 #define IDX_BLACK   8
 
 #define MAX_COLOUR  8
+
+// This colour index resets palette mappings / boarder colours to defaults
+#define IDX_DEFAULTS    255
 
 #define DEF_INK     GREEN 
 #define DEF_PAPER   BLACK
@@ -177,6 +192,7 @@ uint bytes_per_row(uint mode)
 #define STATUS_LOWER    0x08
 #define STATUS_AUTO     0x10
 #define STATUS_80COL    0x20
+#define STATUS_BORDER   0x40
 
 #define STATUS_ARTI_MASK    0x03
 
