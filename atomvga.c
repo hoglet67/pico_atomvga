@@ -284,7 +284,7 @@ void switch_colour(uint8_t          newcolour,
 {
     if (newcolour < NO_COLOURS)
     {
-        *tochange=colour_palette_atom[newcolour];
+        *tochange=colour_palette_vdg[newcolour];
     }
 }
 
@@ -292,7 +292,7 @@ void switch_border(uint8_t          newcolour)
 {
     if (newcolour < NO_COLOURS)
     {
-        border=colour_palette_atom[newcolour];
+        border=colour_palette_vdg[newcolour];
         status_sc(true,STATUS_BORDER);
     }
     else if (IDX_DEFAULTS == newcolour)
@@ -308,13 +308,13 @@ void switch_palette(uint8_t          slots)
 
     if ( ( slot1 < NO_COLOURS) && ( slot2 < NO_COLOURS)  )
     {
-        colour_palette[slot1] = colour_palette_default[slot2];
+        colour_palette[slot1] = colour_palette_vdg_default[slot2];
     } 
     else if (IDX_DEFAULTS == slots) // Reset the palette from the default
     {
         for ( int i = 0; i < NO_COLOURS; ++i)
         {
-            colour_palette[i] = colour_palette_default[i];
+            colour_palette[i] = colour_palette_vdg_default[i];
         }
     }
 }
@@ -607,7 +607,7 @@ void save_ee(void)
         write_ee_bytes(EE_ADDRESS,EE_BORDER,(uint8_t *)&border,sizeof(border));
         write_ee(EE_ADDRESS,EE_STATUS,status);
 
-        write_ee_bytes(EE_ADDRESS,EE_COLOUR0,(uint8_t *)&colour_palette_atom,sizeof(colour_palette_atom));
+        write_ee_bytes(EE_ADDRESS,EE_COLOUR0,(uint8_t *)&colour_palette_vdg,sizeof(colour_palette_vdg));
 
         printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, status=%02X\n",fontno,ink,paper,ink_alt,status);
     }
@@ -629,7 +629,7 @@ void load_ee(void)
         read_ee_bytes(EE_ADDRESS,EE_BORDER,(uint8_t *)&border,sizeof(border));
         read_ee(EE_ADDRESS,EE_STATUS,(uint8_t *)&status);
         
-        read_ee_bytes(EE_ADDRESS,EE_COLOUR0,(uint8_t *)&colour_palette_atom,sizeof(colour_palette_atom));
+        read_ee_bytes(EE_ADDRESS,EE_COLOUR0,(uint8_t *)&colour_palette_vdg,sizeof(colour_palette_vdg));
 
         // clear 80 col bit.
         status_sc(false,STATUS_80COL);
@@ -847,7 +847,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                     colour_index += 4;
                 }
 
-                fg_colour = colour_palette_atom[colour_index];
+                fg_colour = colour_palette_vdg[colour_index];
             
                 uint pix_row = (SG6_INDEX == sgidx) ? 2 - (sub_row / 4) : 1 - (sub_row / 6);
 

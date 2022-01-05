@@ -27,7 +27,7 @@
 #define MAGENTA (RED | BLUE)
 
 #define NO_COLOURS  9
-uint16_t colour_palette_atom[NO_COLOURS] = {
+uint16_t colour_palette_vdg[NO_COLOURS] = {
     GREEN,
     YELLOW,
     BLUE,
@@ -39,7 +39,7 @@ uint16_t colour_palette_atom[NO_COLOURS] = {
     BLACK
 };
 
-uint16_t colour_palette_default[NO_COLOURS] = {
+uint16_t colour_palette_vdg_default[NO_COLOURS] = {
     GREEN,
     YELLOW,
     BLUE,
@@ -152,7 +152,7 @@ const uint sg_bytes_row[5]  = {1, 4, 6, 12, 1};
 #define SG24_INDEX  3
 #define SG6_INDEX   4
 
-uint16_t *colour_palette = colour_palette_atom;
+uint16_t *colour_palette = colour_palette_vdg;
 
 //                             0  1a   1   2a    2   3a    3   4a    4
 //                             0  1    2    3    4    5    6    7    8
