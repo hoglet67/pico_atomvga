@@ -66,6 +66,7 @@ volatile bool reset_flag = false;
 
 volatile uint8_t status = STATUS_NONE;
 #define status_set(mask)    ((status & mask) ? true : false)
+#define extmode_set(mask)   ((memory[COL80_BASE] & mask) ? true : false)
 
 // Initialise the GPIO pins - overrides whatever the scanvideo library did
 static void initialiseIO()
@@ -97,7 +98,7 @@ static void initialiseIO()
 }
 
 void reset_vga80();
-
+void set_extmode(uint8_t    mode);
 void core1_func();
 
 static semaphore_t video_initted;
@@ -224,6 +225,8 @@ inline void status_sc(bool      state,
     status = state ? (status | bits) : (status & ~bits); 
 }
 
+
+
 #if (PLATFORM == PLATFORM_ATOM)
 bool is_command(char *cmd,
                 char **params)
@@ -303,8 +306,8 @@ void switch_border(uint8_t          newcolour)
 
 void switch_palette(uint8_t          slots)
 {
-    uint8_t slot1 = slots / 16;
-    uint8_t slot2 = slots - slot1 * 16;
+    uint8_t slot1 = (slots & 0xF0) >> 4; // slots / 16;
+    uint8_t slot2 = slots & 0x0F;
 
     if ( ( slot1 < NO_COLOURS) && ( slot2 < NO_COLOURS)  )
     {
@@ -374,7 +377,12 @@ void __no_inline_not_in_flash_func(main_loop())
             {
                 pio_sm_put(pio, 1, 0xFF00 | status);
             }
-
+#if (PLATFORM == PLATFORM_DRAGON)
+            else if ((address > STATUS_ADDR) && (address < DRAGON_PALETTE_ADDR))
+            {
+                pio_sm_put(pio, 1, 0xFF00 | memory[address]);
+            }
+#endif
             // Check for reset vector fetch, if so flag reset
             if ((RESET_VEC+1 == address) && (RESET_VEC == last))
             {
@@ -410,29 +418,24 @@ void __no_inline_not_in_flash_func(main_loop())
             if (DRAGON_FONTNO_ADDR == address)
             {
                 switch_font(data);
-            }
-
-            if (DRAGON_INK_ADDR == address)
+            } 
+            else if (DRAGON_INK_ADDR == address)
             {
                 switch_colour(data,&ink);
             }
-
-            if (DRAGON_PAPER_ADDR == address)
+            else if (DRAGON_PAPER_ADDR == address)
             {
                 switch_colour(data,&paper);
             }
-
-            if (DRAGON_INKALT_ADDR == address)
+            else if (DRAGON_INKALT_ADDR == address)
             {
                 switch_colour(data,&ink_alt);
             }
-            
-            if (DRAGON_BORDER_ADDR == address)
+            else if (DRAGON_BORDER_ADDR == address)
             {
                 switch_border(data);
             }
-            
-            if (DRAGON_PALETTE_ADDR == address)
+            else if (DRAGON_PALETTE_ADDR == address)
             {
                 switch_palette(data);
             }
@@ -459,12 +462,12 @@ int main(void)
 
     switch_font(DEFAULT_FONT);
 
+    memset((void *)memory, VDG_SPACE, 0x10000);
+
 #if (PLATFORM == PLATFORM_DRAGON)
     ee_at_reset();
     load_ee();
 #endif
-
-    memset((void *)memory, VDG_SPACE, 0x10000);
 
     char mess[32];
 
@@ -588,13 +591,39 @@ void check_command()
     }
     else if (is_command("80COL",&params))
     {
-        status_sc(true,STATUS_80COL);
-
-        memory[COL80_BASE] = COL80_ON;
+        status_sc(true,STATUS_EXTMODE);
+        set_extmode(COL80_ON);
+        ClearCommand();
+    }
+    else if (is_command("64COL",&params))
+    {
+        status_sc(true,STATUS_EXTMODE);
+        set_extmode(COL64_ON);
+        ClearCommand();
+    }
+    else if (is_command("80COL",&params))
+    {
+        status_sc(true,STATUS_EXTMODE);
+        set_extmode(COL40_ON);
         ClearCommand();
     }
 }
 #elif (PLATFORM == PLATFORM_DRAGON)
+
+uint8_t index_from_colour(uint16_t  colour)
+{
+    uint8_t colidx = IDX_DEFAULTS;
+
+    for(uint8_t palidx=0; palidx <= MAX_COLOUR; palidx++)
+    {
+        if(colour == colour_palette[palidx])
+        {
+            colidx=palidx;
+        }
+    }
+
+    return colidx;
+}
 
 void save_ee(void)
 {
@@ -615,13 +644,13 @@ void save_ee(void)
 
 void load_ee(void)
 {
-    uint8_t tempb;
+    uint8_t fontno;
     uint8_t autoload;
 
     if(0 <= read_ee(EE_ADDRESS,EE_AUTOLOAD,(uint8_t *)&autoload))
     {
-        read_ee(EE_ADDRESS,EE_FONTNO,&tempb);
-        switch_font(tempb);
+        read_ee(EE_ADDRESS,EE_FONTNO,&fontno);
+        switch_font(fontno);
 
         read_ee_bytes(EE_ADDRESS,EE_INK,(uint8_t *)&ink,sizeof(ink));
         read_ee_bytes(EE_ADDRESS,EE_PAPER,(uint8_t *)&paper,sizeof(paper));
@@ -632,8 +661,15 @@ void load_ee(void)
         read_ee_bytes(EE_ADDRESS,EE_COLOUR0,(uint8_t *)&colour_palette_vdg,sizeof(colour_palette_vdg));
 
         // clear 80 col bit.
-        status_sc(false,STATUS_80COL);
+        status_sc(false,STATUS_EXTMODE);
 
+        // update in memory copies of loaded defaults so that we can read them from basic
+        memory[DRAGON_FONTNO_ADDR]=fontno;
+        memory[DRAGON_INK_ADDR]=index_from_colour(ink);
+        memory[DRAGON_PAPER_ADDR]=index_from_colour(paper);
+        memory[DRAGON_INKALT_ADDR]=index_from_colour(ink_alt);
+        memory[DRAGON_BORDER_ADDR]=index_from_colour(border);
+        
         printf("fontno=%02X, ink=%04X, paper=%04X, alt_ink=%04X, status=%02X\n",fontno,ink,paper,ink_alt,status);
     }
 }
@@ -671,7 +707,7 @@ void check_command()
         oldcommand=command;
     }
     // Update 80 column status.
-    status_sc((memory[COL80_BASE] & COL80_ON),STATUS_80COL);
+    status_sc(extmode_set(EXTMODES),STATUS_EXTMODE);
 }
 #endif
 
@@ -694,8 +730,6 @@ void check_reset(void)
         reset_flag = false;
     }
 }
-
-const uint chars_per_row = 32;
 
 const uint vga_width = 640;
 const uint vga_height = 480;
@@ -762,18 +796,22 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
     // Each char is 12 x 8 pixels
     // Note we divide ralative_line_number by 2 as we are double scanning each 6847 line to
     // 2 VGA lines.
-    uint row = (relative_line_num / 2) / FONT_HEIGHT;           // char row
-    uint sub_row = (relative_line_num / 2) % FONT_HEIGHT;       // scanline within current char row
-    uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();            // index into semigraphics table
-    uint rows_per_char  = FONT_HEIGHT / sg_bytes_row[sgidx];    // bytes per character space vertically
-    uint8_t *fontdata = fonts[fontno].fontdata + sub_row;       // Local fontdata pointer
-    
-    if (row < 16)
+    bool is_64col   = extmode_set(COL64_ON);                        // Flag to select 32 / 64 characters / row mode
+    uint rowdiv     = is_64col ? 1 : 2;                             // row divider
+    uint row = (relative_line_num / rowdiv) / FONT_HEIGHT;          // char row
+    uint sub_row = (relative_line_num / rowdiv) % FONT_HEIGHT;      // scanline within current char row
+    uint sgidx = is_debug ? TEXT_INDEX : GetSAMSG();                // index into semigraphics table
+    uint rows_per_char  = FONT_HEIGHT / sg_bytes_row[sgidx];        // bytes per character space vertically
+    uint8_t *fontdata = fonts[fontno].fontdata + sub_row;           // Local fontdata pointer
+    uint cols = is_64col ? 64 : 32;                                 // Characters per row (columns)
+    uint rows = is_64col ? 32 : 16;                                 // Rows
+
+    if (row < rows)
     {
         // Calc start address for this row
-        uint vdu_address = ((chars_per_row * sg_bytes_row[sgidx]) * row) + (chars_per_row * (sub_row / rows_per_char));
+        uint vdu_address = ((cols * sg_bytes_row[sgidx]) * row) + (cols * (sub_row / rows_per_char));
 
-        for (int col = 0; col < 32; col++)
+        for (uint col = 0; col < cols; col++)
         {
             // Get character data from RAM and extract inv,ag,int/ext
             uint ch = vdu_base[vdu_address + col];
@@ -812,7 +850,7 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 {
                     *p++ = COMPOSABLE_COLOR_RUN;
                     *p++ = bg_colour;
-                    *p++ = 16 - 3;
+                    *p++ = is_64col ? 8 - 3 : 16 - 3;
                 }
                 else
                 {
@@ -821,13 +859,20 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                     uint16_t c = (b & 0x80) ? fg_colour : bg_colour;
                     *p++ = COMPOSABLE_RAW_RUN;
                     *p++ = c;
-                    *p++ = 16 - 3;
-                    *p++ = c;
+                    *p++ = is_64col ? 8 - 3 : 16 - 3;
+                    if (!is_64col)
+                    {
+                            *p++ = c;
+                    }
+
                     for (uint8_t mask = 0x40; mask > 0; mask = mask >> 1)
                     {
                         c = (b & mask) ? fg_colour : bg_colour;
                         *p++ = c;
-                        *p++ = c;
+                        if (!is_64col)
+                        {
+                            *p++ = c;
+                        }
                     }
                 }
             }
@@ -855,10 +900,10 @@ uint16_t *do_text(scanvideo_scanline_buffer_t *buffer, uint relative_line_num, c
                 uint16_t pix1 = ((ch >> (pix_row * 2)) & 0x2) ? fg_colour : bg_colour;
                 *p++ = COMPOSABLE_COLOR_RUN;
                 *p++ = pix1;
-                *p++ = 8 - 3;
+                *p++ = is_64col ? 4 - 3 : 8 - 3;
                 *p++ = COMPOSABLE_COLOR_RUN;
                 *p++ = pix0;
-                *p++ = 8 - 3;
+                *p++ = is_64col ? 4 - 3 : 8 - 3;
             }
         }
     }
@@ -1356,6 +1401,16 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
     assert(buffer->data_used < buffer->data_max);
 
     buffer->status = SCANLINE_OK;
+}
+
+// Set extended text mode, ensuring mode is valid and only one extended mode bit is
+// enabled at once.
+void set_extmode(uint8_t    mode)
+{
+    if ((COL80_ON == mode ) || (COL64_ON == mode ) || (COL40_ON == mode ))
+    {
+        memory[COL80_BASE] = (memory[COL80_BASE] & ~EXTMODES) | mode;
+    }
 }
 
 void core1_func()

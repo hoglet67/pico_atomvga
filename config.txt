@@ -81,7 +81,7 @@ $FF80 Status port, bit coded :
         $04 Debug line enabled
         $08 Lowercase enabled (if font supports it)
         $10 Auto load of settings at startup enabled
-        $20 80 column mode enabled, not saved to eeprom
+        $20 Enhanced text mode enabled, not saved to eeprom, see value at $FF88 for mode
         $40 Non default boarder colour set
         $80 Reserved
 
@@ -148,10 +148,16 @@ $FF86   Change the colour in one slot of the palette. Uses a single byte as foll
 
         $FF returns to the defaults
 
-$FF88   80 Column mode control.
+$FF88   Enhanced text mode control.
         Bit 
-        7 ($80) 80 column mode enabled  when set, normal VDG when clear
-        3 ($08) Attribute mode enabled when set disabled when clear
+        7 ($80) 80x38 text mode enabled  when set, normal VDG when clear (see notes)
+        6 ($40) 64x32 text mode enabled  when set, normal VDG when clear (see notes)
+        5 ($20) 40x38 text mode enabled  when set, normal VDG when clear (see notes)
+        3 ($08) Attribute mode enabled when set disabled when clear (80 col mode only)
+
+notes: 
+1) Normal VDG mode is active ONLY when bits all bits 7,6,5 are clear. 
+2) 80x38 and 40x38 use 80 col palette below, 64x32 uses standard VDG palette above.
 
 $FF89   80 Coulmn mode foreground colour (text)
         Note colours are different from normal VDG colours.....

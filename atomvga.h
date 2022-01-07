@@ -180,9 +180,11 @@ uint bytes_per_row(uint mode)
 
 #define COL80_OFF   0x00
 #define COL80_ON    0x80
-#define COL40_ON    0x40
+#define COL64_ON    0x40
+#define COL40_ON    0x20
 #define COL80_ATTR  0x08
 
+#define EXTMODES    (COL80_ON | COL64_ON | COL40_ON)
 
 // Status bits
 #define STATUS_NONE     0x00
@@ -191,7 +193,7 @@ uint bytes_per_row(uint mode)
 #define STATUS_DEBUG    0x04
 #define STATUS_LOWER    0x08
 #define STATUS_AUTO     0x10
-#define STATUS_80COL    0x20
+#define STATUS_EXTMODE  0x20
 #define STATUS_BORDER   0x40
 
 #define STATUS_ARTI_MASK    0x03

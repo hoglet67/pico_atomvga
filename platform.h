@@ -147,6 +147,8 @@ volatile uint16_t       SAMBits;
 #define DRAGON_BORDER_ADDR  0xFF85
 #define DRAGON_PALETTE_ADDR 0xFF86
 
+#define DRAGON_TOP_ADDR     DRAGON_PALETTE_ADDR
+
 #define DRAGON_CMD_NOP      0x00
 #define DRAGON_CMD_DEBUG    0x01
 #define DRAGON_CMD_NODEBUG  0x02
