@@ -1,17 +1,19 @@
 #ifndef ATOMVGA_H_
 #define ATOMVGA_H_
 
-#define RED_1 0x0400
-#define RED_2 0x0800
-#define RED 0x0C00
+// Changed scanvideo setup so colour bits are in LSB of word
 
-#define GREEN_1 0x1000
-#define GREEN_2 0x2000
-#define GREEN 0x3000
+#define RED_1 0x0001
+#define RED_2 0x0002
+#define RED (RED_2 | RED_1)
 
-#define BLUE_1 0x4000
-#define BLUE_2 0x8000
-#define BLUE 0xC000
+#define GREEN_1 0x0004
+#define GREEN_2 0x0008
+#define GREEN (GREEN_2 | GREEN_1)
+
+#define BLUE_1 0x0010
+#define BLUE_2 0x0020
+#define BLUE (BLUE_2 | BLUE_1)
 
 #define BLACK 0
 #define YELLOW (RED | GREEN)
@@ -25,7 +27,19 @@
 #define MAGENTA (RED | BLUE)
 
 #define NO_COLOURS  9
-uint16_t colour_palette_atom[NO_COLOURS] = {
+uint16_t colour_palette_vdg[NO_COLOURS] = {
+    GREEN,
+    YELLOW,
+    BLUE,
+    RED,
+    WHITE,
+    CYAN,
+    MAGENTA,
+    ORANGE,
+    BLACK
+};
+
+uint16_t colour_palette_vdg_default[NO_COLOURS] = {
     GREEN,
     YELLOW,
     BLUE,
@@ -49,6 +63,9 @@ uint16_t colour_palette_atom[NO_COLOURS] = {
 
 #define MAX_COLOUR  8
 
+// This colour index resets palette mappings / boarder colours to defaults
+#define IDX_DEFAULTS    255
+
 #define DEF_INK     GREEN 
 #define DEF_PAPER   BLACK
 #define DEF_INK_ALT ORANGE
@@ -65,12 +82,38 @@ uint16_t colour_palette_vga80[8] = {
     WHITE
 };
 
+#define IDX80_GREEN   2
+#define IDX80_YELLOW  6
+#define IDX80_BLUE    1
+#define IDX80_RED     4
+#define IDX80_WHITE   7
+#define IDX80_CYAN    3   
+#define IDX80_MAGENTA 5
+#define IDX80_ORANGE  IDX80_GREEN
+#define IDX80_BLACK   0
+
+// Ordered in vdg pallete order translates vdg->80 col pallete.
+uint8_t vdgpal_to_80colpal [NO_COLOURS] = {
+        IDX80_GREEN,
+        IDX80_YELLOW,
+        IDX80_BLUE,
+        IDX80_RED,
+        IDX80_WHITE,
+        IDX80_CYAN,
+        IDX80_MAGENTA,
+        IDX80_ORANGE,
+        IDX80_BLACK
+}; 
+
+
+#if 0
 uint16_t colour_palette_improved[4] = {
     BLACK,
     YELLOW,
     GREEN,
     MAGENTA,
 };
+#endif 
 
 uint16_t colour_palette_artifact1[4] = {
     BLACK,
@@ -109,7 +152,7 @@ const uint sg_bytes_row[5]  = {1, 4, 6, 12, 1};
 #define SG24_INDEX  3
 #define SG6_INDEX   4
 
-uint16_t *colour_palette = colour_palette_atom;
+uint16_t *colour_palette = colour_palette_vdg;
 
 //                             0  1a   1   2a    2   3a    3   4a    4
 //                             0  1    2    3    4    5    6    7    8
@@ -137,6 +180,25 @@ uint bytes_per_row(uint mode)
 
 #define COL80_OFF   0x00
 #define COL80_ON    0x80
+#define COL64_ON    0x40
+#define COL40_ON    0x20
 #define COL80_ATTR  0x08
+
+#define EXTMODES    (COL80_ON | COL64_ON | COL40_ON)
+
+// Status bits
+#define STATUS_NONE     0x00
+#define STATUS_ARTI1    0x01
+#define STATUS_ARTI2    0x02
+#define STATUS_DEBUG    0x04
+#define STATUS_LOWER    0x08
+#define STATUS_AUTO     0x10
+#define STATUS_EXTMODE  0x20
+#define STATUS_BORDER   0x40
+
+#define STATUS_ARTI_MASK    0x03
+
+#define get_artifact()  (status & STATUS_ARTI_MASK)
+
 
 #endif /* ATOMVGA_H_ */
