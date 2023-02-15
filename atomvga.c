@@ -241,7 +241,11 @@ bool uint8_param(char *params,
                 int max)
 {
     int try;
-    if (sscanf(params, "%d", &try))
+    //DMB: Avoid sscanf, it bloats the uf2 size by 100KB
+    //if (sscanf(params, "%d", &try))
+    char *end;
+    try = strtol(params, &end, 10);
+    if (end > params)
     {
         if ((try >= min) && (try <= max))
         {
