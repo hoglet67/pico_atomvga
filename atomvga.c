@@ -283,7 +283,9 @@ void switch_colour(uint8_t          newcolour,
 volatile bool support_lower = false;
 
 #if (R65C02 == 1)
-void __no_inline_not_in_flash_func(main_loop())
+// DMB: no need to specify __no_inline_not_in_flash_func as CMakeLists.txt
+// specifies pico_set_binary_type(TARGET copy_to_ram) for all targets
+void main_loop()
 {
     while (true)
     {
@@ -308,7 +310,9 @@ void __no_inline_not_in_flash_func(main_loop())
 }
 #else
 
-void __no_inline_not_in_flash_func(main_loop())
+// DMB: no need to specify __no_inline_not_in_flash_func as CMakeLists.txt
+// specifies pico_set_binary_type(TARGET copy_to_ram) for all targets
+void main_loop()
 {
     static uint16_t    last = 0;
 

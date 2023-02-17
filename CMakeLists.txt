@@ -35,6 +35,8 @@ pico_add_extra_outputs(atomvga)
 
 pico_enable_stdio_uart(atomvga 1)
 
+pico_set_binary_type(atomvga copy_to_ram)
+
 #
 # Atom R65C02 Build
 #
@@ -59,6 +61,8 @@ target_link_libraries(atomvga_r65c02 PRIVATE
 pico_add_extra_outputs(atomvga_r65c02)
 
 pico_enable_stdio_uart(atomvga_r65c02 1)
+
+pico_set_binary_type(atomvga_r65c02 copy_to_ram)
 
 #
 # Dragon Build
@@ -86,3 +90,5 @@ target_link_libraries(dragonvga PRIVATE
 pico_add_extra_outputs(dragonvga)
 
 pico_enable_stdio_uart(dragonvga 1)
+
+pico_set_binary_type(dragonvga copy_to_ram)
