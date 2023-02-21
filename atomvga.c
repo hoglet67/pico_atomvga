@@ -1172,11 +1172,8 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
     buffer->status = SCANLINE_OK;
 }
 
-void core1_func()
-{
 
-    // initialize video and interrupts on core 1
-    initialize_vga80();
+#ifdef GENLOCK
 
     // Genlock code
     //
@@ -1194,8 +1191,8 @@ void core1_func()
     // Assume a system clock of 250MHz (4ns)
     //
     // 0.004 * 2 * (4 + 249 / 256) * 800 * 2 = 63.65 [ -706 ppm ]
-    // 0.004 * 2 * (4 + 250 / 256) * 800 * 2 = 63.70 [  -78 ppm ]
-    // 0.004 * 2 * (4 + 251 / 256) * 800 * 2 = 63.75 [ +683 ppm ]
+    // 0.004 * 2 * (4 + 250 / 256) * 800 * 2 = 63.70 [  +78 ppm ]
+    // 0.004 * 2 * (4 + 251 / 256) * 800 * 2 = 63.75 [ +863 ppm ]
     //
     // Strategy 1:  Alternate the fractional divider between 249 and 251
     // which looks awful on VGA, but RGBtoHDMI just about manages to sample
@@ -1208,15 +1205,20 @@ void core1_func()
     // A value of V=5 over the 44 blanking line gives an effective variation
     // of +/-330 ppm, which should be sufficient for a +/- 100pm crystal.
 
-#ifdef GENLOCK
-
     // PLL parameters (will need changing if the system clock changes)
 
     #define PLL_DELTA  5
-
+    #define PLL_VGA80  (5 * 256)
     #define PLL_NOM    (4 * 256 + 250)
     #define PLL_SLOW   (PLL_NOM + PLL_DELTA)
     #define PLL_FAST   (PLL_NOM - PLL_DELTA)
+
+void core1_func()
+{
+    static bool genlock = false;
+
+    // initialize video and interrupts on core 1
+    initialize_vga80();
 
     scanvideo_timing_t custom_timing = {
         .clock_freq = 25000000,
@@ -1246,12 +1248,6 @@ void core1_func()
 
     scanvideo_setup(&custom_mode);
 
-#else
-
-    scanvideo_setup(&vga_mode);
-
-#endif
-
     initialiseIO();
     scanvideo_timing_enable(true);
     sem_release(&video_initted);
@@ -1259,23 +1255,83 @@ void core1_func()
     while (true)
     {
         uint vga80 = memory[COL80_BASE] & COL80_ON;
-#ifdef GENLOCK
-        const bool block = false;
-#else
-        const bool block = true;
-#endif
-        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(block);
+        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(false);
         if (scanline_buffer) {
-            if (vga80)
-                {
-                    draw_color_bar_vga80(scanline_buffer);
-                }
-            else
-                {
-                    draw_color_bar(scanline_buffer);
-                }
+            if (vga80) {
+                draw_color_bar_vga80(scanline_buffer);
+            } else {
+                draw_color_bar(scanline_buffer);
+            }
             scanvideo_end_scanline_generation(scanline_buffer);
         }
+        if (vga80 != last_vga80) {
+           if (vga80) {
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_INVERT);
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_INVERT);
+              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_VGA80 >> 8, PLL_VGA80 & 0xff);
+              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_VGA80 >> 8, PLL_VGA80 & 0xff);
+              pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+              genlock = false;
+           } else {
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_NORMAL);
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_NORMAL);
+              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_NOM >> 8, PLL_NOM & 0xff);
+              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_NOM >> 8, PLL_NOM & 0xff);
+              pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+              genlock = true;
+           }
+           last_vga80 = vga80;
+        }
+        // the rising edge of FS should correspond to the bottom of the display area
+        if (genlock) {
+            static uint last_vb = 0;
+            uint vb = scanvideo_in_vblank();
+            if (last_vb && !vb) {
+                // Use the closest clock during the active part of the display
+                pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_NOM >> 8, PLL_NOM & 0xff);
+                pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_NOM >> 8, PLL_NOM & 0xff);
+                pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+            } else if (vb && !last_vb) {
+                uint atom_vsync = gpio_get(ATOM_FS_PIN);
+                if (atom_vsync) {
+                    // VSYNC is late, so speed up the clock during blanking
+                    pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_FAST >> 8, PLL_FAST & 0xff);
+                    pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_FAST >> 8, PLL_FAST & 0xff);
+                } else {
+                    // VSYNC is early, so slow down the clock during blanking
+                    pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_SLOW >> 8, PLL_SLOW & 0xff);
+                    pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_SLOW >> 8, PLL_SLOW & 0xff);
+                }
+                pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+            }
+            last_vb = vb;
+        }
+    }
+}
+
+
+#else
+
+
+void core1_func()
+{
+
+    // initialize video and interrupts on core 1
+    initialize_vga80();
+    scanvideo_setup(&vga_mode);
+    initialiseIO();
+    scanvideo_timing_enable(true);
+    sem_release(&video_initted);
+    uint last_vga80 = -1;
+    while (true) {
+        uint vga80 = memory[COL80_BASE] & COL80_ON;
+        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
+        if (vga80) {
+            draw_color_bar_vga80(scanline_buffer);
+        } else {
+            draw_color_bar(scanline_buffer);
+        }
+        scanvideo_end_scanline_generation(scanline_buffer);
         if (vga80 != last_vga80) {
            if (vga80) {
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_INVERT);
@@ -1286,29 +1342,7 @@ void core1_func()
            }
            last_vga80 = vga80;
         }
-        // the rising edge of FS should correspond to the bottom of the display area
-#ifdef GENLOCK
-        static uint last_vb = 0;
-        uint vb = scanvideo_in_vblank();
-        if (last_vb && !vb) {
-            // Use the closest clock during the active part of the display
-            pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_NOM >> 8, PLL_NOM & 0xff);
-            pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_NOM >> 8, PLL_NOM & 0xff);
-            pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
-        } else if (vb && !last_vb) {
-           uint atom_vsync = gpio_get(ATOM_FS_PIN);
-           if (atom_vsync) {
-              // VSYNC is late, so speed up the clock during blanking
-              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_FAST >> 8, PLL_FAST & 0xff);
-              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_FAST >> 8, PLL_FAST & 0xff);
-           } else {
-              // VSYNC is early, so slow down the clock during blanking
-              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_SLOW >> 8, PLL_SLOW & 0xff);
-              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_SLOW >> 8, PLL_SLOW & 0xff);
-           }
-           pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
-        }
-        last_vb = vb;
-#endif
     }
 }
+
+#endif
