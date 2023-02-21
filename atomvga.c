@@ -1197,14 +1197,26 @@ void core1_func()
     // 0.004 * 2 * (4 + 250 / 256) * 800 * 2 = 63.70 [  -78 ppm ]
     // 0.004 * 2 * (4 + 251 / 256) * 800 * 2 = 63.75 [ +683 ppm ]
     //
-    // Currently we alternate the fractional divider between 249 and 251
+    // Strategy 1:  Alternate the fractional divider between 249 and 251
     // which looks awful on VGA, but RGBtoHDMI just about manages to sample
     // stable pixels in spite of all the jitted.
     //
-    // A better strategy would be to use 250 for the active lines, then
-    // vary between 249 and 251 as needed during the blanking interval.
+    // Strategy 2: Set the fractional divider to 250 for the active lines, then
+    // vary between 250-delta and 250+delta as needed during the blanking interval.
+    // This works much better, even on VGA.
+    //
+    // A value of V=5 over the 44 blanking line gives an effective variation
+    // of +/-330 ppm, which should be sufficient for a +/- 100pm crystal.
 
 #ifdef GENLOCK
+
+    // PLL parameters (will need changing if the system clock changes)
+
+    #define PLL_DELTA  5
+
+    #define PLL_NOM    (4 * 256 + 250)
+    #define PLL_SLOW   (PLL_NOM + PLL_DELTA)
+    #define PLL_FAST   (PLL_NOM - PLL_DELTA)
 
     scanvideo_timing_t custom_timing = {
         .clock_freq = 25000000,
@@ -1233,6 +1245,7 @@ void core1_func()
     };
 
     scanvideo_setup(&custom_mode);
+
 #else
 
     scanvideo_setup(&vga_mode);
@@ -1277,23 +1290,23 @@ void core1_func()
 #ifdef GENLOCK
         static uint last_vb = 0;
         uint vb = scanvideo_in_vblank();
-        if (vb & !last_vb) {
-            //if ((scanvideo_get_next_scanline_id() & 0xffff) == 481) {
+        if (last_vb && !vb) {
+            // Use the closest clock during the active part of the display
+            pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_NOM >> 8, PLL_NOM & 0xff);
+            pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_NOM >> 8, PLL_NOM & 0xff);
+            pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+        } else if (vb && !last_vb) {
            uint atom_vsync = gpio_get(ATOM_FS_PIN);
-           int clkdiv;
-           static int last_clkdiv = -1;
            if (atom_vsync) {
-              // VSYNC is late, so speed up the clock
-              clkdiv = 249;
+              // VSYNC is late, so speed up the clock during blanking
+              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_FAST >> 8, PLL_FAST & 0xff);
+              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_FAST >> 8, PLL_FAST & 0xff);
            } else {
-              // VSYNC is early, so slow down the clock
-              clkdiv = 251;
+              // VSYNC is early, so slow down the clock during blanking
+              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_SLOW >> 8, PLL_SLOW & 0xff);
+              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_SLOW >> 8, PLL_SLOW & 0xff);
            }
-           if (clkdiv != last_clkdiv) {
-              pio_sm_set_clkdiv_int_frac(pio0, 0, 4, clkdiv);
-              pio_sm_set_clkdiv_int_frac(pio0, 3, 4, clkdiv);
-              last_clkdiv = clkdiv;
-           }
+           pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
         }
         last_vb = vb;
 #endif
