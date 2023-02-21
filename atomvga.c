@@ -31,12 +31,20 @@
 #include "eeprom.h"
 #endif
 
+// Uncomment this for some very experimental genlock code. For this to work
+// connect Atom nFS from pin 5 of PL4 to GPIO20 via level shifter of some kind.
+
+// #define GENLOCK
 
 // PIA and frambuffer address moved into platform.h -- PHS
 
 
 // #define vga_mode vga_mode_320x240_60
 #define vga_mode vga_mode_640x480_60
+
+#ifdef GENLOCK
+const uint ATOM_FS_PIN = 20;
+#endif
 
 const uint LED_PIN = 25;
 const uint SEL1_PIN = test_PIN_SEL1;
@@ -88,6 +96,12 @@ static void initialiseIO()
     // LED
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
+
+#ifdef GENLOCK
+    // Atom Frame Sync input
+    gpio_init(ATOM_FS_PIN);
+    gpio_set_dir(ATOM_FS_PIN, GPIO_IN);
+#endif
 }
 
 void reset_vga80();
@@ -410,6 +424,9 @@ int main(void)
     }
     set_sys_clock_khz(sys_freq, true);
 
+    stdio_init_all();
+    printf("Atom VGA built " __DATE__ " " __TIME__ "\r\n");
+
     switch_font(DEFAULT_FONT);
 
 #if (PLATFORM == PLATFORM_DRAGON)
@@ -421,7 +438,7 @@ int main(void)
     }
 #endif
     
-    memset(memory, 0, 0x10000);
+    memset((void *)memory, 0, 0x10000);
     for (int i = GetVidMemBase(); i < GetVidMemBase() + 0x200; i++)
     {
         memory[i] = VDG_SPACE;
@@ -843,7 +860,11 @@ void draw_color_bar(scanvideo_scanline_buffer_t *buffer)
 
                 *p++ = COMPOSABLE_RAW_RUN;
                 *p++ = border_colour;
-                *p++ = 512 + 1 - 3;
+                *p++ = 512 + 2 - 3;
+
+                // Add a second extra pixel, so the two-pixel alignment is the same between text and graphics modes
+                // (this gives RGBtoHDMI a better chance of sampling the middle of the pixel-pair in both modes
+                *p++ = border_colour;
 
                 const uint pixel_count = get_width(mode);
 
@@ -1153,24 +1174,128 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
 
 void core1_func()
 {
+
     // initialize video and interrupts on core 1
     initialize_vga80();
+
+    // Genlock code
+    //
+    // The Atom 6847 has:
+    // - h period = 63.695us
+    // - v frequency = 59.92274Hz
+    // (+/- 100ppm)
+    //
+    // The default vga mode has 523 lines and a 25MHz clock
+    // - h period (2 lines) = 64us
+    // - v frequency = 59.75143Hz
+    //
+    // Define a custom mode with 524 lines and a fractional clock divider
+    //
+    // Assume a system clock of 250MHz (4ns)
+    //
+    // 0.004 * 2 * (4 + 249 / 256) * 800 * 2 = 63.65 [ -706 ppm ]
+    // 0.004 * 2 * (4 + 250 / 256) * 800 * 2 = 63.70 [  -78 ppm ]
+    // 0.004 * 2 * (4 + 251 / 256) * 800 * 2 = 63.75 [ +683 ppm ]
+    //
+    // Currently we alternate the fractional divider between 249 and 251
+    // which looks awful on VGA, but RGBtoHDMI just about manages to sample
+    // stable pixels in spite of all the jitted.
+    //
+    // A better strategy would be to use 250 for the active lines, then
+    // vary between 249 and 251 as needed during the blanking interval.
+
+#ifdef GENLOCK
+
+    scanvideo_timing_t custom_timing = {
+        .clock_freq = 25000000,
+        .h_active = 640,
+        .v_active = 480,
+        .h_front_porch = 16,
+        .h_pulse = 64,
+        .h_total = 800,
+        .h_sync_polarity = 1,
+        .v_front_porch = 1,
+        .v_pulse = 2,
+        .v_total = 524,
+        .v_sync_polarity = 1,
+        .enable_clock = 0,
+        .clock_polarity = 0,
+        .enable_den = 0
+    };
+
+    scanvideo_mode_t custom_mode = {
+        .default_timing = &custom_timing,
+        .pio_program = &video_24mhz_composable,
+        .width = 640,
+        .height = 480,
+        .xscale = 1,
+        .yscale = 1,
+    };
+
+    scanvideo_setup(&custom_mode);
+#else
+
     scanvideo_setup(&vga_mode);
+
+#endif
+
     initialiseIO();
     scanvideo_timing_enable(true);
     sem_release(&video_initted);
+    uint last_vga80 = -1;
     while (true)
     {
         uint vga80 = memory[COL80_BASE] & COL80_ON;
-        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
-        if (vga80)
-        {
-            draw_color_bar_vga80(scanline_buffer);
+#ifdef GENLOCK
+        const bool block = false;
+#else
+        const bool block = true;
+#endif
+        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(block);
+        if (scanline_buffer) {
+            if (vga80)
+                {
+                    draw_color_bar_vga80(scanline_buffer);
+                }
+            else
+                {
+                    draw_color_bar(scanline_buffer);
+                }
+            scanvideo_end_scanline_generation(scanline_buffer);
         }
-        else
-        {
-            draw_color_bar(scanline_buffer);
+        if (vga80 != last_vga80) {
+           if (vga80) {
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_INVERT);
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_INVERT);
+           } else {
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_NORMAL);
+              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_NORMAL);
+           }
+           last_vga80 = vga80;
         }
-        scanvideo_end_scanline_generation(scanline_buffer);
+        // the rising edge of FS should correspond to the bottom of the display area
+#ifdef GENLOCK
+        static uint last_vb = 0;
+        uint vb = scanvideo_in_vblank();
+        if (vb & !last_vb) {
+            //if ((scanvideo_get_next_scanline_id() & 0xffff) == 481) {
+           uint atom_vsync = gpio_get(ATOM_FS_PIN);
+           int clkdiv;
+           static int last_clkdiv = -1;
+           if (atom_vsync) {
+              // VSYNC is late, so speed up the clock
+              clkdiv = 249;
+           } else {
+              // VSYNC is early, so slow down the clock
+              clkdiv = 251;
+           }
+           if (clkdiv != last_clkdiv) {
+              pio_sm_set_clkdiv_int_frac(pio0, 0, 4, clkdiv);
+              pio_sm_set_clkdiv_int_frac(pio0, 3, 4, clkdiv);
+              last_clkdiv = clkdiv;
+           }
+        }
+        last_vb = vb;
+#endif
     }
 }
