@@ -34,7 +34,7 @@
 // Uncomment this for some very experimental genlock code. For this to work
 // connect Atom nFS from pin 5 of PL4 to GPIO20 via level shifter of some kind.
 
-// #define GENLOCK
+#define GENLOCK
 
 // PIA and frambuffer address moved into platform.h -- PHS
 
@@ -43,7 +43,21 @@
 #define vga_mode vga_mode_640x480_60
 
 #ifdef GENLOCK
+
+#define PLL_SAFE  (5 * 256)
+
 const uint ATOM_FS_PIN = 20;
+
+volatile uint genlock_delta = 0;
+
+volatile uint genlock_nominal = (4 * 256 + 250);
+
+static inline void set_clkdiv(uint i) {
+    pio_sm_set_clkdiv_int_frac(pio0, 0, i >> 8, i & 0xff);
+    pio_sm_set_clkdiv_int_frac(pio0, 3, i >> 8, i & 0xff);
+    pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+}
+
 #endif
 
 const uint LED_PIN = 25;
@@ -550,6 +564,24 @@ void check_command()
         memory[COL80_BASE] = COL80_ON;
         ClearCommand();
     }
+#ifdef GENLOCK
+    else if (is_command("CLKDIV",&params))
+    {
+        if (uint8_param(params,&temp, 4 * 256 , 6 * 256)) {
+            genlock_nominal = temp;
+            set_clkdiv(temp);
+        }
+        ClearCommand();
+    }
+    else if (is_command("GENLOCK",&params))
+    {
+        if (uint8_param(params,&temp,0,255))
+        {
+            genlock_delta = temp;
+        }
+        ClearCommand();
+    }
+#endif
 }
 #elif (PLATFORM == PLATFORM_DRAGON)
 
@@ -1205,17 +1237,9 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
     // A value of V=5 over the 44 blanking line gives an effective variation
     // of +/-330 ppm, which should be sufficient for a +/- 100pm crystal.
 
-    // PLL parameters (will need changing if the system clock changes)
-
-    #define PLL_DELTA  5
-    #define PLL_VGA80  (5 * 256)
-    #define PLL_NOM    (4 * 256 + 250)
-    #define PLL_SLOW   (PLL_NOM + PLL_DELTA)
-    #define PLL_FAST   (PLL_NOM - PLL_DELTA)
-
 void core1_func()
 {
-    static bool genlock = false;
+    static uint last_genlock = -1;
 
     // initialize video and interrupts on core 1
     initialize_vga80();
@@ -1255,6 +1279,7 @@ void core1_func()
     while (true)
     {
         uint vga80 = memory[COL80_BASE] & COL80_ON;
+        uint genlock = (genlock_delta > 0) && !vga80;
         scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(false);
         if (scanline_buffer) {
             if (vga80) {
@@ -1268,17 +1293,9 @@ void core1_func()
            if (vga80) {
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_INVERT);
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_INVERT);
-              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_VGA80 >> 8, PLL_VGA80 & 0xff);
-              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_VGA80 >> 8, PLL_VGA80 & 0xff);
-              pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
-              genlock = false;
            } else {
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_NORMAL);
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_NORMAL);
-              pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_NOM >> 8, PLL_NOM & 0xff);
-              pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_NOM >> 8, PLL_NOM & 0xff);
-              pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
-              genlock = true;
            }
            last_vga80 = vga80;
         }
@@ -1288,24 +1305,23 @@ void core1_func()
             uint vb = scanvideo_in_vblank();
             if (last_vb && !vb) {
                 // Use the closest clock during the active part of the display
-                pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_NOM >> 8, PLL_NOM & 0xff);
-                pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_NOM >> 8, PLL_NOM & 0xff);
-                pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+                set_clkdiv(genlock_nominal);
             } else if (vb && !last_vb) {
                 uint atom_vsync = gpio_get(ATOM_FS_PIN);
                 if (atom_vsync) {
                     // VSYNC is late, so speed up the clock during blanking
-                    pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_FAST >> 8, PLL_FAST & 0xff);
-                    pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_FAST >> 8, PLL_FAST & 0xff);
+                    set_clkdiv(genlock_nominal - genlock_delta);
                 } else {
                     // VSYNC is early, so slow down the clock during blanking
-                    pio_sm_set_clkdiv_int_frac(pio0, 0, PLL_SLOW >> 8, PLL_SLOW & 0xff);
-                    pio_sm_set_clkdiv_int_frac(pio0, 3, PLL_SLOW >> 8, PLL_SLOW & 0xff);
+                    set_clkdiv(genlock_nominal + genlock_delta);
                 }
-                pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
             }
             last_vb = vb;
+        } else if (last_genlock) {
+            // Reset the clock to nominal when genlock is disabled
+            set_clkdiv(PLL_SAFE);
         }
+        last_genlock = genlock;
     }
 }
 
