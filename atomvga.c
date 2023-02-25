@@ -1391,14 +1391,25 @@ void core1_func()
         }
         // the rising edge of FS should correspond to the bottom of the display area
         if (genlock) {
-            static uint last_vb = 0;
-            uint vb = scanvideo_in_vblank();
-            // if (last_vb && !vb) {
-            //     // Use the closest clock during the active part of the display
-            //     set_clkdiv(genlock_nominal);
-            // } else
-            if (vb && !last_vb) {
-                static bool locked = false;
+            static bool locked = false;
+            static uint last_gstate = 0;
+            static int delta = 0;
+            int gstate;
+            if ((scanvideo_get_next_scanline_id() & 0xFFFF) == 436) {
+                gstate = 1; // Start genlock correction
+            } else if (scanvideo_in_vblank()) {
+                gstate = 0; // End genlock correction
+            }
+            if (!gstate && last_gstate) {
+
+                // End of genlock correction
+
+                set_clkdiv(genlock_nominal);
+
+            } else if (gstate && !last_gstate) {
+
+                // Start of genlock correction
+
                 // Read the current VSYNC offset (in us) and calculate difference from target
                 int error = read_vsync_offset() - GENLOCK_TARGET;
                 // Optimize the direction for correction
@@ -1408,7 +1419,7 @@ void core1_func()
                     error -= 18000;
                 }
                 // Now error is in range -9000 -> +9000
-                int delta = 0; // Default to no correction
+                delta = 0; // Default to no correction
                 if (locked) {
                     // Locked
                     if (abs(error) > GENLOCK_UNLOCKED_THRESHOLD) {
@@ -1435,10 +1446,6 @@ void core1_func()
                 }
                 if (delta) {
                     set_clkdiv(genlock_nominal + delta);
-                    // Wait for ~20 lines
-                    busy_wait_us(64 * GENLOCK_LINES);
-                    // Use the closest clock during the active part of the display
-                    set_clkdiv(genlock_nominal);
                 }
                 static int c = 0;
                 c++;
@@ -1446,7 +1453,8 @@ void core1_func()
                     printf("%c %d %d\r\n", (locked ? 'L' : 'U'), error, delta);
                 }
             }
-            last_vb = vb;
+
+            last_gstate = gstate;
         } else if (last_genlock) {
             // Reset the clock to nominal when genlock is disabled
             set_clkdiv(PLL_SAFE);
