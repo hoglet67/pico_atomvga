@@ -77,7 +77,7 @@ volatile uint genlock_delta = 0;
 #define GENLOCK_TARGET           14638  // Target for genlock vsync offset (in us)
 #define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
 #define GENLOCK_COARSE_DELTA        10  // Coarse correction delta for PIO clock divider
-#define GENLOCK_FINE_DELTA           4  // Fine correction delta for PIO clock divider
+#define GENLOCK_FINE_DELTA           3  // Fine correction delta for PIO clock divider
 #define GENLOCK_UNLOCKED_THRESHOLD  16  // Error threshold for unlocking (restarting correction)
 #define GENLOCK_LOCKED_THRESHOLD     4  // Error threshold for locking (stopping correction)
 #define GENLOCK_LINES               20  // The number of lines to applied the varied clockdiv over
@@ -1392,12 +1392,12 @@ void core1_func()
         // the rising edge of FS should correspond to the bottom of the display area
         if (genlock) {
             static bool locked = false;
+            static uint gstate = 0;
             static uint last_gstate = 0;
             static int delta = 0;
-            int gstate;
-            if ((scanvideo_get_next_scanline_id() & 0xFFFF) == 436) {
+            if ((scanvideo_get_next_scanline_id() & 0xFFFF) == 433) {
                 gstate = 1; // Start genlock correction
-            } else if (scanvideo_in_vblank()) {
+            } else if ((scanvideo_get_next_scanline_id() & 0xFFFF) == 479) {
                 gstate = 0; // End genlock correction
             }
             if (!gstate && last_gstate) {
