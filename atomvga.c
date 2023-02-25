@@ -70,17 +70,16 @@
 #define PLL_SAFE 0x500
 
 volatile uint genlock_nominal = 0x4ff;
-volatile uint genlock_delta = 0;
+volatile uint genlock_enabled = 0;
 
 #include "genlock.pio.h"
 
-#define GENLOCK_TARGET           14638  // Target for genlock vsync offset (in us)
+#define GENLOCK_TARGET           14702  // Target for genlock vsync offset (in us)
 #define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
-#define GENLOCK_COARSE_DELTA        10  // Coarse correction delta for PIO clock divider
-#define GENLOCK_FINE_DELTA           3  // Fine correction delta for PIO clock divider
-#define GENLOCK_UNLOCKED_THRESHOLD  16  // Error threshold for unlocking (restarting correction)
-#define GENLOCK_LOCKED_THRESHOLD     4  // Error threshold for locking (stopping correction)
-#define GENLOCK_LINES               20  // The number of lines to applied the varied clockdiv over
+#define GENLOCK_COARSE_DELTA         3  // Coarse correction delta for PIO clock divider
+#define GENLOCK_FINE_DELTA           1  // Fine correction delta for PIO clock divider
+#define GENLOCK_UNLOCKED_THRESHOLD  32  // Error threshold for unlocking, i.e. restarting correction (in us)
+#define GENLOCK_LOCKED_THRESHOLD     8  // Error threshold for locking, i.e. stopping correction (in us)
 
 static inline void set_clkdiv(uint i) {
     pio_sm_set_clkdiv_int_frac(pio0, 0, i >> 8, i & 0xff);
@@ -647,7 +646,7 @@ void check_command()
     {
         if (uint8_param(params,&temp,0,255))
         {
-            genlock_delta = temp;
+            genlock_enabled = temp;
         }
         ClearCommand();
     }
@@ -1297,6 +1296,8 @@ uint read_vsync_offset() {
     return result;
 }
 
+    // TODO - this is woefully out of date and needs re-writing
+    //
     // Genlock code
     //
     // The Atom 6847 has:
@@ -1369,16 +1370,13 @@ void core1_func()
     while (true)
     {
         uint vga80 = memory[COL80_BASE] & COL80_ON;
-        uint genlock = (genlock_delta > 0) && !vga80;
-        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(false);
-        if (scanline_buffer) {
-            if (vga80) {
-                draw_color_bar_vga80(scanline_buffer);
-            } else {
-                draw_color_bar(scanline_buffer);
-            }
-            scanvideo_end_scanline_generation(scanline_buffer);
+        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
+        if (vga80) {
+            draw_color_bar_vga80(scanline_buffer);
+        } else {
+            draw_color_bar(scanline_buffer);
         }
+        scanvideo_end_scanline_generation(scanline_buffer);
         if (vga80 != last_vga80) {
            if (vga80) {
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_INVERT);
@@ -1389,37 +1387,31 @@ void core1_func()
            }
            last_vga80 = vga80;
         }
-        // the rising edge of FS should correspond to the bottom of the display area
+
+        uint genlock = genlock_enabled && !vga80;
+
         if (genlock) {
             static bool locked = false;
-            static uint gstate = 0;
-            static uint last_gstate = 0;
-            static int delta = 0;
-            if ((scanvideo_get_next_scanline_id() & 0xFFFF) == 433) {
-                gstate = 1; // Start genlock correction
-            } else if ((scanvideo_get_next_scanline_id() & 0xFFFF) == 479) {
-                gstate = 0; // End genlock correction
-            }
-            if (!gstate && last_gstate) {
+            static int last_clkdiv = 0;
+            static int last_line = 0;
 
-                // End of genlock correction
+            int line = scanvideo_get_next_scanline_id() & 0xFFFF;
 
-                set_clkdiv(genlock_nominal);
-
-            } else if (gstate && !last_gstate) {
-
-                // Start of genlock correction
+            // Calculate genlock correction on line 433 (at the end of the Atom active display)
+            if (line == 433 && line != last_line) {
 
                 // Read the current VSYNC offset (in us) and calculate difference from target
                 int error = read_vsync_offset() - GENLOCK_TARGET;
+
                 // Optimize the direction for correction
                 if (error < -9000) {
                     error += 18000;
                 } else if (error > 9000) {
                     error -= 18000;
                 }
+
                 // Now error is in range -9000 -> +9000
-                delta = 0; // Default to no correction
+                int delta = 0; // Default to no correction
                 if (locked) {
                     // Locked
                     if (abs(error) > GENLOCK_UNLOCKED_THRESHOLD) {
@@ -1444,17 +1436,14 @@ void core1_func()
                         }
                     }
                 }
-                if (delta) {
-                    set_clkdiv(genlock_nominal + delta);
+                int clkdiv = genlock_nominal + delta;
+                if (clkdiv != last_clkdiv) {
+                    set_clkdiv(clkdiv);
+                    last_clkdiv = clkdiv;
                 }
-                static int c = 0;
-                c++;
-                if (c & 1) {
-                    printf("%c %d %d\r\n", (locked ? 'L' : 'U'), error, delta);
-                }
+                printf("%c %d %d\r\n", (locked ? 'L' : 'U'), error, delta);
             }
-
-            last_gstate = gstate;
+            last_line = line;
         } else if (last_genlock) {
             // Reset the clock to nominal when genlock is disabled
             set_clkdiv(PLL_SAFE);
