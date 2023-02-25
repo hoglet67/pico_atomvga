@@ -1,0 +1,34 @@
+.program genlock
+
+.define PIN_VGA_VSYNC 17
+.define public PIN_ATOM_FS   20
+
+// Measure the time between the falling edge of VGA VSync and the falling edge of Atom FS
+
+.wrap_target
+    mov x ~NULL                                        ; x = 0xFFFFFFFF
+    wait 1 GPIO PIN_VGA_VSYNC                          ; wait for VGA VSYNC to be high
+    wait 0 GPIO PIN_VGA_VSYNC                          ; wait for VGA VSYNC to be low
+
+wait_for_atom_fs_high:
+    jmp pin wait_for_atom_fs_low                       ; break out of loop if Atom FS high
+    jmp x-- wait_for_atom_fs_high                      ; decrement the X counter and loop back (x should not wrap)
+
+wait_for_atom_fs_low:
+    jmp x-- next                                       ; decrement the X counter
+next:
+    jmp pin wait_for_atom_fs_low                       ; loop back while Atom FS still high   
+    in x 32                                            ; push the count to the RxFIFO
+.wrap    
+
+% c-sdk {
+// this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
+
+void genlock_program_init(PIO pio, uint sm, uint offset) {
+   pio_sm_config c = genlock_program_get_default_config(offset);
+   sm_config_set_jmp_pin(&c, genlock_PIN_ATOM_FS);
+   sm_config_set_in_shift(&c, true, true, 32); // shift right, auto-push disabled
+   pio_sm_init(pio, sm, offset, &c);
+}
+
+%}

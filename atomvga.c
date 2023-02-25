@@ -24,6 +24,8 @@
 #include "pico/sync.h"
 #include "hardware/irq.h"
 #include "hardware/vreg.h"
+#include "hardware/pll.h"
+#include "hardware/clocks.h"
 #include "atomvga.h"
 #include "fonts.h"
 #include "platform.h"
@@ -33,24 +35,52 @@
 
 // Uncomment this for some very experimental genlock code. For this to work
 // connect Atom nFS from pin 5 of PL4 to GPIO20 via level shifter of some kind.
-
 #define GENLOCK
 
 // PIA and frambuffer address moved into platform.h -- PHS
 
-
 // #define vga_mode vga_mode_320x240_60
 #define vga_mode vga_mode_640x480_60
 
-#ifdef GENLOCK
+#ifndef GENLOCK
 
-#define PLL_SAFE  (5 * 256)
+// GENLOCK code not included
 
-const uint ATOM_FS_PIN = 20;
+#define SYS_FREQ 250000
 
+#else
+
+// GENLOCK code included
+
+// With an Atom line of 63.710us (Dave's Atom)
+// 248.000000 (refdiv = 1; fbdiv = 124, vco = 1488 pd1 = 6, pd2 = 1, clkdiv = 0x4f0 (1264), ppm =  -5.06
+// #define SYS_FREQ 248000
+
+// With an Atom line of 63.695us (Nomimal Atom)
+// 251.000000 (refdiv = 2; fbdiv = 251, vco = 1506 pd1 = 6, pd2 = 1, clkdiv = 0x4ff (1279), ppm =   3.44
+#define SYS_FREQ 251000
+
+// If REFDIV is other than 1, then specify other parameters for pll_init()
+#define REFDIV 2
+#define VCO 1506000000
+#define PD1 6
+#define PD2 1
+
+// This is used for VGA80 most, and should be the nearest integer CLKDIV value
+#define PLL_SAFE 0x500
+
+volatile uint genlock_nominal = 0x4ff;
 volatile uint genlock_delta = 0;
 
-volatile uint genlock_nominal = (4 * 256 + 250);
+#include "genlock.pio.h"
+
+#define GENLOCK_TARGET           14638  // Target for genlock vsync offset (in us)
+#define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
+#define GENLOCK_COARSE_DELTA        10  // Coarse correction delta for PIO clock divider
+#define GENLOCK_FINE_DELTA           4  // Fine correction delta for PIO clock divider
+#define GENLOCK_UNLOCKED_THRESHOLD  16  // Error threshold for unlocking (restarting correction)
+#define GENLOCK_LOCKED_THRESHOLD     4  // Error threshold for locking (stopping correction)
+#define GENLOCK_LINES               20  // The number of lines to applied the varied clockdiv over
 
 static inline void set_clkdiv(uint i) {
     pio_sm_set_clkdiv_int_frac(pio0, 0, i >> 8, i & 0xff);
@@ -110,12 +140,6 @@ static void initialiseIO()
     // LED
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
-
-#ifdef GENLOCK
-    // Atom Frame Sync input
-    gpio_init(ATOM_FS_PIN);
-    gpio_set_dir(ATOM_FS_PIN, GPIO_IN);
-#endif
 }
 
 void reset_vga80();
@@ -429,14 +453,53 @@ void print_str(int line_num, char* str)
     memcpy((char *)(memory + GetVidMemBase() + 0x020*line_num), debug_text, 32);
 }
 
+
+void set_sys_clock_pll_refdiv(uint refdiv, uint32_t vco_freq, uint post_div1, uint post_div2) {
+    if (!running_on_fpga()) {
+        clock_configure(clk_sys,
+                        CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
+                        CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB,
+                        48 * MHZ,
+                        48 * MHZ);
+
+        pll_init(pll_sys, refdiv, vco_freq, post_div1, post_div2);
+        uint32_t freq = vco_freq / (post_div1 * post_div2);
+
+        // Configure clocks
+        // CLK_REF = XOSC (12MHz) / 1 = 12MHz
+        clock_configure(clk_ref,
+                        CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC,
+                        0, // No aux mux
+                        12 * MHZ,
+                        12 * MHZ);
+
+        // CLK SYS = PLL SYS (125MHz) / 1 = 125MHz
+        clock_configure(clk_sys,
+                        CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
+                        CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+                        freq, freq);
+
+        clock_configure(clk_peri,
+                        0, // Only AUX mux on ADC
+                        CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB,
+                        48 * MHZ,
+                        48 * MHZ);
+    }
+}
+
 int main(void)
 {
-    uint sys_freq = 250000;
+    uint sys_freq = SYS_FREQ;
     if (sys_freq > 250000)
     {
         vreg_set_voltage(VREG_VOLTAGE_1_25);
     }
+
+#ifdef REFDIV
+    set_sys_clock_pll_refdiv(REFDIV, VCO, PD1, PD2);
+#else
     set_sys_clock_khz(sys_freq, true);
+#endif
 
     stdio_init_all();
     printf("Atom VGA built " __DATE__ " " __TIME__ "\r\n");
@@ -488,6 +551,13 @@ int main(void)
     offset = pio_add_program(pio, &atomvga_out_program);
     atomvga_out_program_init(pio, 1, offset);
     pio_sm_set_enabled(pio, 1, true);
+
+#ifdef GENLOCK
+    // State machine to track the offset between VGA VS and Atom FS
+    offset = pio_add_program(pio0, &genlock_program);
+    genlock_program_init(pio0, 1, offset);
+    pio_sm_set_enabled(pio0, 1, true);
+#endif
 
     main_loop();
 }
@@ -1207,6 +1277,26 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
 
 #ifdef GENLOCK
 
+#define TICK_PER_US = SYS_FREQ / KHZ / 2;
+
+int sign(int x) {
+    return (x > 0) - (x < 0);
+}
+
+// Return a value in us (should be between 0 and 16666)
+uint read_vsync_offset() {
+    // This variable is static so the last result can be returned
+    static uint result = 0;
+    if (!pio_sm_is_rx_fifo_empty(pio0, 1)) {
+        u_int32_t offset = 0;
+        while (!pio_sm_is_rx_fifo_empty(pio0, 1)) {
+           offset = pio_sm_get(pio0, 1);
+        }
+        result = (0xffffffff - offset) / (SYS_FREQ / KHZ / 2);
+    }
+    return result;
+}
+
     // Genlock code
     //
     // The Atom 6847 has:
@@ -1245,7 +1335,7 @@ void core1_func()
     initialize_vga80();
 
     scanvideo_timing_t custom_timing = {
-        .clock_freq = 25000000,
+        .clock_freq = SYS_FREQ * 100,
         .h_active = 640,
         .v_active = 480,
         .h_front_porch = 16,
@@ -1303,17 +1393,57 @@ void core1_func()
         if (genlock) {
             static uint last_vb = 0;
             uint vb = scanvideo_in_vblank();
-            if (last_vb && !vb) {
-                // Use the closest clock during the active part of the display
-                set_clkdiv(genlock_nominal);
-            } else if (vb && !last_vb) {
-                uint atom_vsync = gpio_get(ATOM_FS_PIN);
-                if (atom_vsync) {
-                    // VSYNC is late, so speed up the clock during blanking
-                    set_clkdiv(genlock_nominal - genlock_delta);
+            // if (last_vb && !vb) {
+            //     // Use the closest clock during the active part of the display
+            //     set_clkdiv(genlock_nominal);
+            // } else
+            if (vb && !last_vb) {
+                static bool locked = false;
+                // Read the current VSYNC offset (in us) and calculate difference from target
+                int error = read_vsync_offset() - GENLOCK_TARGET;
+                // Optimize the direction for correction
+                if (error < -9000) {
+                    error += 18000;
+                } else if (error > 9000) {
+                    error -= 18000;
+                }
+                // Now error is in range -9000 -> +9000
+                int delta = 0; // Default to no correction
+                if (locked) {
+                    // Locked
+                    if (abs(error) > GENLOCK_UNLOCKED_THRESHOLD) {
+                        // Lock lost
+                        locked = false;
+                        if (abs(error) < GENLOCK_COARSE_THRESHOLD) {
+                            delta = sign(error) * GENLOCK_FINE_DELTA;
+                        } else {
+                            delta = sign(error) * GENLOCK_COARSE_DELTA;
+                        }
+                    }
                 } else {
-                    // VSYNC is early, so slow down the clock during blanking
-                    set_clkdiv(genlock_nominal + genlock_delta);
+                    // Unlocked
+                    if (abs(error) < GENLOCK_LOCKED_THRESHOLD) {
+                        // Lock regained
+                        locked = true;
+                    } else {
+                        if (abs(error) < GENLOCK_COARSE_THRESHOLD) {
+                            delta = sign(error) * GENLOCK_FINE_DELTA;
+                        } else {
+                            delta = sign(error) * GENLOCK_COARSE_DELTA;
+                        }
+                    }
+                }
+                if (delta) {
+                    set_clkdiv(genlock_nominal + delta);
+                    // Wait for ~20 lines
+                    busy_wait_us(64 * GENLOCK_LINES);
+                    // Use the closest clock during the active part of the display
+                    set_clkdiv(genlock_nominal);
+                }
+                static int c = 0;
+                c++;
+                if (c & 1) {
+                    printf("%c %d %d\r\n", (locked ? 'L' : 'U'), error, delta);
                 }
             }
             last_vb = vb;
