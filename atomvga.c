@@ -37,6 +37,11 @@
 // connect Atom nFS from pin 5 of PL4 to GPIO20 via level shifter of some kind.
 #define GENLOCK
 
+// Uncomment this to use the scanvideo line length to genlock, rather
+// than the clock divider. This gives 250ppm steps, rather than 780ppm
+// steps.
+#define USE_SCANVIDEO
+
 // PIA and frambuffer address moved into platform.h -- PHS
 
 // #define vga_mode vga_mode_320x240_60
@@ -74,12 +79,26 @@ volatile uint genlock_enabled = 0;
 
 #include "genlock.pio.h"
 
+// TODO: refactor so we don't need tweaked values
+#ifdef USE_SCANVIDEO
+
+#define GENLOCK_TARGET           14686  // Target for genlock vsync offset (in us)
+#define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
+#define GENLOCK_COARSE_DELTA         8  // Coarse correction delta for PIO clock divider
+#define GENLOCK_FINE_DELTA           1  // Fine correction delta for PIO clock divider
+#define GENLOCK_UNLOCKED_THRESHOLD   8  // Error threshold for unlocking, i.e. restarting correction (in us)
+#define GENLOCK_LOCKED_THRESHOLD     4  // Error threshold for locking, i.e. stopping correction (in us)
+
+#else
+
 #define GENLOCK_TARGET           14702  // Target for genlock vsync offset (in us)
 #define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
 #define GENLOCK_COARSE_DELTA         3  // Coarse correction delta for PIO clock divider
 #define GENLOCK_FINE_DELTA           1  // Fine correction delta for PIO clock divider
 #define GENLOCK_UNLOCKED_THRESHOLD  32  // Error threshold for unlocking, i.e. restarting correction (in us)
 #define GENLOCK_LOCKED_THRESHOLD     8  // Error threshold for locking, i.e. stopping correction (in us)
+
+#endif
 
 static inline void set_clkdiv(uint i) {
     pio_sm_set_clkdiv_int_frac(pio0, 0, i >> 8, i & 0xff);
@@ -1273,8 +1292,79 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
     buffer->status = SCANLINE_OK;
 }
 
-
 #ifdef GENLOCK
+
+#ifdef USE_SCANVIDEO
+
+// This genlock mode forces the scanvideo timing state machine to run
+// at the system clock (rather than system clock / 5). The line length
+// is increased by 5x, from 800 to 4000, to compensate so the timing
+// remains the same. This results a 250ppm (1/4000) adjustment step,
+// rather than the 780ppm (1/1280) adjustment step with the fractional
+// divider
+//
+// Warning: this needs a change to
+// pico-extras/src/rp2_common/pico_scanvideo_dpi/scanvideo.c line 193
+// to remove the static keyword, so the struct is no longer private
+//
+// If you get a compile error here, then check you have made this change.
+
+// Import timing_state structure from scanvideo.c
+
+extern struct {
+    int32_t v_active;
+    int32_t v_total;
+    int32_t v_pulse_start;
+    int32_t v_pulse_end;
+    // todo replace with plain polarity
+    uint32_t vsync_bits_pulse;
+    uint32_t vsync_bits_no_pulse;
+
+    uint32_t a, a_vblank, b1, b2, c, c_vblank;
+    uint32_t vsync_bits;
+    uint16_t dma_state_index;
+    int32_t timing_scanline;
+} timing_state;
+
+// The a, a_vblank, b1, b2, c, c_vblank are pixel counts for various
+// parts of the horizontal line. Their effective values need
+// multiplying by 5, as we want to clock the timing state machine at
+// the system clock, rather than at the 2x the pixel clock. But there
+// is a complication, as these values have been corrected for some
+// fixed overheads in the timing.pio state machine. These are:
+//
+// out exec, 16        2
+// out x, 13           1
+// out pins, 3         1
+// loop:
+// nop                 1 (because x=1 would go around the loop twice)
+// jmp x-- loop        1
+//
+// This is 6 cycles, which is equivalent to three pixels (at a 2x pixel clock)
+//
+// scanvideo.c has a #define for this correction factor, which we reproduce here:
+#define TIMING_CYCLE 3u
+
+// For reference, this is used in the scanvideo.c timing_encode() macro:
+// #define timing_encode(state, length, pins) ((video_htiming_states_program.instructions[state] ^ side_set_xor)| (((uint32_t)(length) - TIMING_CYCLE) << 16u) | ((uint32_t)(pins) << 29u))
+//
+// From this, we can see the  dma state values are encoded as:
+// bits 31..29 = sync values
+// bits 28..16 = length
+// bits 15.. 0 = instruction
+//
+// We need to patch the length, so the timing is the same with a 5x
+// clock, taking account of this correction factor.
+//   i.e. length := ((length + 3) * 5) - 3
+
+uint32_t patch_htiming(uint32_t value) {
+    uint32_t length = ((value >> 16) & 0x1FFF) + TIMING_CYCLE;
+    printf("%lu\r\n", length);
+    length *= 5;
+    return (value & 0xE000FFFF) | (length - TIMING_CYCLE) << 16;
+}
+
+#endif
 
 #define TICK_PER_US = SYS_FREQ / KHZ / 2;
 
@@ -1367,6 +1457,30 @@ void core1_func()
     scanvideo_timing_enable(true);
     sem_release(&video_initted);
     uint last_vga80 = -1;
+
+#ifdef USE_SCANVIDEO
+    timing_state.a        = patch_htiming(timing_state.a        );
+    timing_state.b1       = patch_htiming(timing_state.b1       );
+    timing_state.b2       = patch_htiming(timing_state.b2       );
+    timing_state.c        = patch_htiming(timing_state.c        );
+    timing_state.a_vblank = patch_htiming(timing_state.a_vblank );
+    timing_state.c_vblank = patch_htiming(timing_state.c_vblank );
+
+    // Genlock using timing_state by varying line length
+    uint32_t nominal_c        = timing_state.c;
+    uint32_t nominal_c_vblank = timing_state.c_vblank;
+
+    // At 251MHz system clock, the nominal line time is 3997 rather than 4000
+    // or for Dave's atom it us 3998
+
+    nominal_c        -= 0x00030000;
+    nominal_c_vblank -= 0x00030000;
+
+    pio_sm_set_clkdiv_int_frac(pio0, 0, 5, 0); // The scanline state machine
+    pio_sm_set_clkdiv_int_frac(pio0, 3, 1, 0); // The timing state machine
+    pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
+#endif
+
     while (true)
     {
         uint vga80 = memory[COL80_BASE] & COL80_ON;
@@ -1438,7 +1552,12 @@ void core1_func()
                 }
                 int clkdiv = genlock_nominal + delta;
                 if (clkdiv != last_clkdiv) {
+#ifdef USE_SCANVIDEO
+                    timing_state.c = nominal_c + (delta << 16);
+                    timing_state.c_vblank = nominal_c_vblank + (delta << 16);
+#else
                     set_clkdiv(clkdiv);
+#endif
                     last_clkdiv = clkdiv;
                 }
                 printf("%c %d %d\r\n", (locked ? 'L' : 'U'), error, delta);
@@ -1446,7 +1565,12 @@ void core1_func()
             last_line = line;
         } else if (last_genlock) {
             // Reset the clock to nominal when genlock is disabled
+#ifdef USE_SCANVIDEO
+            timing_state.c = nominal_c;
+            timing_state.c_vblank = nominal_c_vblank;
+#else
             set_clkdiv(PLL_SAFE);
+#endif
         }
         last_genlock = genlock;
     }
