@@ -98,8 +98,8 @@ volatile uint genlock_enabled = 0;
 
 #define GENLOCK_TARGET           14686  // Target for genlock vsync offset (in us)
 #define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
-#define GENLOCK_COARSE_DELTA         8  // Coarse correction delta for PIO clock divider
-#define GENLOCK_FINE_DELTA           1  // Fine correction delta for PIO clock divider
+#define GENLOCK_COARSE_DELTA        16  // Coarse correction delta for PIO clock divider
+#define GENLOCK_FINE_DELTA           2  // Fine correction delta for PIO clock divider
 #define GENLOCK_UNLOCKED_THRESHOLD   8  // Error threshold for unlocking, i.e. restarting correction (in us)
 #define GENLOCK_LOCKED_THRESHOLD     4  // Error threshold for locking, i.e. stopping correction (in us)
 
@@ -1340,6 +1340,9 @@ extern struct {
     int32_t timing_scanline;
 } timing_state;
 
+// This also needs to have the static keyword removed in scanvideo.c
+extern uint8_t video_htiming_load_offset;
+
 // The a, a_vblank, b1, b2, c, c_vblank are pixel counts for various
 // parts of the horizontal line. Their effective values need
 // multiplying by 5, as we want to clock the timing state machine at
@@ -1359,6 +1362,8 @@ extern struct {
 // scanvideo.c has a #define for this correction factor, which we reproduce here:
 #define TIMING_CYCLE 3u
 
+#define TIMING_CYCLE2 6u
+
 // For reference, this is used in the scanvideo.c timing_encode() macro:
 // #define timing_encode(state, length, pins) ((video_htiming_states_program.instructions[state] ^ side_set_xor)| (((uint32_t)(length) - TIMING_CYCLE) << 16u) | ((uint32_t)(pins) << 29u))
 //
@@ -1374,8 +1379,8 @@ extern struct {
 uint32_t patch_htiming(uint32_t value) {
     uint32_t length = ((value >> 16) & 0x1FFF) + TIMING_CYCLE;
     printf("%lu\r\n", length);
-    length *= 5;
-    return (value & 0xE000FFFF) | (length - TIMING_CYCLE) << 16;
+    length *= 10;
+    return (value & 0xE000FFFF) | (length - TIMING_CYCLE2) << 16;
 }
 
 #endif
@@ -1434,7 +1439,7 @@ uint read_vsync_offset() {
 
 void core1_func()
 {
-    static uint last_genlock = -1;
+    static uint last_genlock = 0;
 
     // initialize video and interrupts on core 1
     initialize_vga80();
@@ -1489,6 +1494,18 @@ void core1_func()
     timing_state.a_vblank = patch_htiming(timing_state.a_vblank );
     timing_state.c_vblank = patch_htiming(timing_state.c_vblank );
 
+    // In video_htimimg change:
+    //
+    // loop: nop
+    //       jmp x-- loop
+    //
+    // to
+    //
+    //       nop
+    // loop: jmp x-- loop
+    //
+    pio0->instr_mem[video_htiming_load_offset + 5] = pio_encode_jmp_x_dec(video_htiming_load_offset + 5);
+
     // Genlock using timing_state by varying line length
     uint32_t nominal_c        = timing_state.c;
     uint32_t nominal_c_vblank = timing_state.c_vblank;
@@ -1496,8 +1513,8 @@ void core1_func()
     // At 251MHz system clock, the nominal line time is 3997 rather than 4000
     // or for Dave's atom it us 3998
 
-    nominal_c        -= 0x00030000;
-    nominal_c_vblank -= 0x00030000;
+    nominal_c        -= 0x00060000;
+    nominal_c_vblank -= 0x00060000;
 
     pio_sm_set_clkdiv_int_frac(pio0, 0, 5, 0); // The scanline state machine
     pio_sm_set_clkdiv_int_frac(pio0, 3, 1, 0); // The timing state machine
