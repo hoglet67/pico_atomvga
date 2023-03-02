@@ -33,92 +33,25 @@
 #include "eeprom.h"
 #endif
 
-// Uncomment this for some very experimental genlock code. For this to work
-// connect Atom nFS from pin 5 of PL4 to GPIO20 via level shifter of some kind.
-// #define GENLOCK
-
-// Uncomment this to use the scanvideo line length to genlock, rather
-// than the clock divider. This gives 250ppm steps, rather than 780ppm
-// steps.
-// #define USE_MODE2
-
-// Uncomment this to use the numver of vertical lines to genlock, rather
-// than the clock divider. This gives ~2000ppm steps, and I haven't
-// yes found a monitor that it works well with!
-// #define USE_MODE2
-
 // PIA and frambuffer address moved into platform.h -- PHS
 
-// #define vga_mode vga_mode_320x240_60
-#define vga_mode vga_mode_640x480_60
-
-#ifndef GENLOCK
-
-// GENLOCK code not included
-
-#define SYS_FREQ 250000
-
-#else
+#ifdef GENLOCK
 
 // GENLOCK code included
 
-// With an Atom line of 63.710us (Dave's Atom)
-// 248.000000 (refdiv = 1; fbdiv = 124, vco = 1488 pd1 = 6, pd2 = 1, clkdiv = 0x4f0 (1264), ppm =  -5.06
-// #define SYS_FREQ 248000
+#include "genlock.h"
 
-// With an Atom line of 63.695us (Nomimal Atom)
-// 251.000000 (refdiv = 2; fbdiv = 251, vco = 1506 pd1 = 6, pd2 = 1, clkdiv = 0x4ff (1279), ppm =   3.44
-#define SYS_FREQ 251000
+#define vga_mode custom_mode
 
-// If REFDIV is other than 1, then specify other parameters for pll_init()
-#define REFDIV 2
-#define VCO 1506000000
-#define PD1 6
-#define PD2 1
-
-// This is used for VGA80 most, and should be the nearest integer CLKDIV value
-#define PLL_SAFE 0x500
-
-volatile uint genlock_nominal = 0x4ff;
-volatile uint genlock_enabled = 0;
-
-#include "genlock.pio.h"
-
-// TODO: refactor so we don't need tweaked values
-#if defined(USE_MODE3)
-
-#define GENLOCK_TARGET           14686  // Target for genlock vsync offset (in us)
-#define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
-#define GENLOCK_COARSE_DELTA         1  // Coarse correction delta for PIO clock divider
-#define GENLOCK_FINE_DELTA           1  // Fine correction delta for PIO clock divider
-#define GENLOCK_UNLOCKED_THRESHOLD  32  // Error threshold for unlocking, i.e. restarting correction (in us)
-#define GENLOCK_LOCKED_THRESHOLD     8  // Error threshold for locking, i.e. stopping correction (in us)
-
-#elif defined(USE_MODE2)
-
-#define GENLOCK_TARGET           14686  // Target for genlock vsync offset (in us)
-#define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
-#define GENLOCK_COARSE_DELTA        16  // Coarse correction delta for PIO clock divider
-#define GENLOCK_FINE_DELTA           2  // Fine correction delta for PIO clock divider
-#define GENLOCK_UNLOCKED_THRESHOLD   8  // Error threshold for unlocking, i.e. restarting correction (in us)
-#define GENLOCK_LOCKED_THRESHOLD     4  // Error threshold for locking, i.e. stopping correction (in us)
+static genlock_mode_t genlock_setting = GENLOCK_OFF;
 
 #else
 
-#define GENLOCK_TARGET           14702  // Target for genlock vsync offset (in us)
-#define GENLOCK_COARSE_THRESHOLD   128  // Error threshold for applying coarse correction (in us)
-#define GENLOCK_COARSE_DELTA         3  // Coarse correction delta for PIO clock divider
-#define GENLOCK_FINE_DELTA           1  // Fine correction delta for PIO clock divider
-#define GENLOCK_UNLOCKED_THRESHOLD  32  // Error threshold for unlocking, i.e. restarting correction (in us)
-#define GENLOCK_LOCKED_THRESHOLD     8  // Error threshold for locking, i.e. stopping correction (in us)
+// GENLOCK code not included, default to Chris's original clock of 250MHz
 
-#endif
+#define vga_mode vga_mode_640x480_60
 
-static inline void set_clkdiv(uint i) {
-    pio_sm_set_clkdiv_int_frac(pio0, 0, i >> 8, i & 0xff);
-    pio_sm_set_clkdiv_int_frac(pio0, 3, i >> 8, i & 0xff);
-    pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
-}
+#define SYS_FREQ 250000
 
 #endif
 
@@ -584,13 +517,6 @@ int main(void)
     atomvga_out_program_init(pio, 1, offset);
     pio_sm_set_enabled(pio, 1, true);
 
-#ifdef GENLOCK
-    // State machine to track the offset between VGA VS and Atom FS
-    offset = pio_add_program(pio0, &genlock_program);
-    genlock_program_init(pio0, 1, offset);
-    pio_sm_set_enabled(pio0, 1, true);
-#endif
-
     main_loop();
 }
 
@@ -667,19 +593,11 @@ void check_command()
         ClearCommand();
     }
 #ifdef GENLOCK
-    else if (is_command("CLKDIV",&params))
-    {
-        if (uint8_param(params,&temp, 4 * 256 , 6 * 256)) {
-            genlock_nominal = temp;
-            set_clkdiv(temp);
-        }
-        ClearCommand();
-    }
     else if (is_command("GENLOCK",&params))
     {
-        if (uint8_param(params,&temp,0,255))
+        if (uint8_param(params,&temp,0,GENLOCK_NUM_MODES-1))
         {
-            genlock_enabled = temp;
+            genlock_setting = (genlock_mode_t) temp;
         }
         ClearCommand();
     }
@@ -1306,360 +1224,70 @@ void draw_color_bar_vga80(scanvideo_scanline_buffer_t *buffer)
     buffer->status = SCANLINE_OK;
 }
 
-#ifdef GENLOCK
-
-#if defined(USE_MODE2) || defined(USE_MODE3)
-
-// This genlock mode forces the scanvideo timing state machine to run
-// at the system clock (rather than system clock / 5). The line length
-// is increased by 5x, from 800 to 4000, to compensate so the timing
-// remains the same. This results a 250ppm (1/4000) adjustment step,
-// rather than the 780ppm (1/1280) adjustment step with the fractional
-// divider
-//
-// Warning: this needs a change to
-// pico-extras/src/rp2_common/pico_scanvideo_dpi/scanvideo.c line 193
-// to remove the static keyword, so the struct is no longer private
-//
-// If you get a compile error here, then check you have made this change.
-
-// Import timing_state structure from scanvideo.c
-
-extern struct {
-    int32_t v_active;
-    int32_t v_total;
-    int32_t v_pulse_start;
-    int32_t v_pulse_end;
-    // todo replace with plain polarity
-    uint32_t vsync_bits_pulse;
-    uint32_t vsync_bits_no_pulse;
-
-    uint32_t a, a_vblank, b1, b2, c, c_vblank;
-    uint32_t vsync_bits;
-    uint16_t dma_state_index;
-    int32_t timing_scanline;
-} timing_state;
-
-// This also needs to have the static keyword removed in scanvideo.c
-extern uint8_t video_htiming_load_offset;
-
-// The a, a_vblank, b1, b2, c, c_vblank are pixel counts for various
-// parts of the horizontal line. Their effective values need
-// multiplying by 5, as we want to clock the timing state machine at
-// the system clock, rather than at the 2x the pixel clock. But there
-// is a complication, as these values have been corrected for some
-// fixed overheads in the timing.pio state machine. These are:
-//
-// out exec, 16        2
-// out x, 13           1
-// out pins, 3         1
-// loop:
-// nop                 1 (because x=1 would go around the loop twice)
-// jmp x-- loop        1
-//
-// This is 6 cycles, which is equivalent to three pixels (at a 2x pixel clock)
-//
-// scanvideo.c has a #define for this correction factor, which we reproduce here:
-#define TIMING_CYCLE 3u
-
-#define TIMING_CYCLE2 6u
-
-// For reference, this is used in the scanvideo.c timing_encode() macro:
-// #define timing_encode(state, length, pins) ((video_htiming_states_program.instructions[state] ^ side_set_xor)| (((uint32_t)(length) - TIMING_CYCLE) << 16u) | ((uint32_t)(pins) << 29u))
-//
-// From this, we can see the  dma state values are encoded as:
-// bits 31..29 = sync values
-// bits 28..16 = length
-// bits 15.. 0 = instruction
-//
-// We need to patch the length, so the timing is the same with a 5x
-// clock, taking account of this correction factor.
-//   i.e. length := ((length + 3) * 5) - 3
-
-uint32_t patch_htiming(uint32_t value) {
-    uint32_t length = ((value >> 16) & 0x1FFF) + TIMING_CYCLE;
-    printf("%lu\r\n", length);
-    length *= 10;
-    return (value & 0xE000FFFF) | (length - TIMING_CYCLE2) << 16;
-}
-
-#endif
-
-#define TICK_PER_US = SYS_FREQ / KHZ / 2;
-
-int sign(int x) {
-    return (x > 0) - (x < 0);
-}
-
-// Return a value in us (should be between 0 and 16666)
-uint read_vsync_offset() {
-    // This variable is static so the last result can be returned
-    static uint result = 0;
-    if (!pio_sm_is_rx_fifo_empty(pio0, 1)) {
-        u_int32_t offset = 0;
-        while (!pio_sm_is_rx_fifo_empty(pio0, 1)) {
-           offset = pio_sm_get(pio0, 1);
-        }
-        result = (0xffffffff - offset) / (SYS_FREQ / KHZ / 2);
-    }
-    return result;
-}
-
-    // TODO - this is woefully out of date and needs re-writing
-    //
-    // Genlock code
-    //
-    // The Atom 6847 has:
-    // - h period = 63.695us
-    // - v frequency = 59.92274Hz
-    // (+/- 100ppm)
-    //
-    // The default vga mode has 523 lines and a 25MHz clock
-    // - h period (2 lines) = 64us
-    // - v frequency = 59.75143Hz
-    //
-    // Define a custom mode with 524 lines and a fractional clock divider
-    //
-    // Assume a system clock of 250MHz (4ns)
-    //
-    // 0.004 * 2 * (4 + 249 / 256) * 800 * 2 = 63.65 [ -706 ppm ]
-    // 0.004 * 2 * (4 + 250 / 256) * 800 * 2 = 63.70 [  +78 ppm ]
-    // 0.004 * 2 * (4 + 251 / 256) * 800 * 2 = 63.75 [ +863 ppm ]
-    //
-    // Strategy 1:  Alternate the fractional divider between 249 and 251
-    // which looks awful on VGA, but RGBtoHDMI just about manages to sample
-    // stable pixels in spite of all the jitted.
-    //
-    // Strategy 2: Set the fractional divider to 250 for the active lines, then
-    // vary between 250-delta and 250+delta as needed during the blanking interval.
-    // This works much better, even on VGA.
-    //
-    // A value of V=5 over the 44 blanking line gives an effective variation
-    // of +/-330 ppm, which should be sufficient for a +/- 100pm crystal.
 
 void core1_func()
 {
-    static uint last_genlock = 0;
-
+#ifdef GENLOCK
+    static genlock_mode_t last_genlock_mode = GENLOCK_OFF;
+    static genlock_t *genlock = NULL;
+#endif
     // initialize video and interrupts on core 1
     initialize_vga80();
-
-    scanvideo_timing_t custom_timing = {
-        .clock_freq = SYS_FREQ * 100,
-        .h_active = 640,
-        .v_active = 480,
-        .h_front_porch = 16,
-        .h_pulse = 64,
-        .h_total = 800,
-        .h_sync_polarity = 1,
-        .v_front_porch = 1,
-        .v_pulse = 2,
-        .v_total = 524,
-        .v_sync_polarity = 1,
-        .enable_clock = 0,
-        .clock_polarity = 0,
-        .enable_den = 0
-    };
-
-    scanvideo_mode_t custom_mode = {
-        .default_timing = &custom_timing,
-        .pio_program = &video_24mhz_composable,
-        .width = 640,
-        .height = 480,
-        .xscale = 1,
-        .yscale = 1,
-    };
-
-    scanvideo_setup(&custom_mode);
-
+    scanvideo_setup(&vga_mode);
+#ifdef GENLOCK
+    genlock_initialize();
+#endif
     initialiseIO();
     scanvideo_timing_enable(true);
     sem_release(&video_initted);
     uint last_vga80 = -1;
-
-#if defined(USE_MODE3)
-    printf("v_total = %ld\r\n", timing_state.v_total);
-    printf("v_active = %ld\r\n", timing_state.v_active);
-    printf("v_pulse_start = %ld\r\n", timing_state.v_pulse_start);
-    printf("v_pulse_end = %ld\r\n", timing_state.v_pulse_end);
-    int nominal_v_total = timing_state.v_total;
-    int nominal_v_pulse_start = timing_state.v_pulse_start;
-    int nominal_v_pulse_end = timing_state.v_pulse_end;
-
-#elif defined(USE_MODE2)
-    timing_state.a        = patch_htiming(timing_state.a        );
-    timing_state.b1       = patch_htiming(timing_state.b1       );
-    timing_state.b2       = patch_htiming(timing_state.b2       );
-    timing_state.c        = patch_htiming(timing_state.c        );
-    timing_state.a_vblank = patch_htiming(timing_state.a_vblank );
-    timing_state.c_vblank = patch_htiming(timing_state.c_vblank );
-
-    // In video_htimimg change:
-    //
-    // loop: nop
-    //       jmp x-- loop
-    //
-    // to
-    //
-    //       nop
-    // loop: jmp x-- loop
-    //
-    pio0->instr_mem[video_htiming_load_offset + 5] = pio_encode_jmp_x_dec(video_htiming_load_offset + 5);
-
-    // Genlock using timing_state by varying line length
-    uint32_t nominal_c        = timing_state.c;
-    uint32_t nominal_c_vblank = timing_state.c_vblank;
-
-    // At 251MHz system clock, the nominal line time is 3997 rather than 4000
-    // or for Dave's atom it us 3998
-
-    nominal_c        -= 0x00060000;
-    nominal_c_vblank -= 0x00060000;
-
-    pio_sm_set_clkdiv_int_frac(pio0, 0, 5, 0); // The scanline state machine
-    pio_sm_set_clkdiv_int_frac(pio0, 3, 1, 0); // The timing state machine
-    pio_clkdiv_restart_sm_mask(pio0, (1<<0 | 1 << 3));
-#endif
-
     while (true)
     {
         uint vga80 = memory[COL80_BASE] & COL80_ON;
         scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
-        if (vga80) {
+        if (vga80)
+        {
             draw_color_bar_vga80(scanline_buffer);
-        } else {
+        }
+        else
+        {
             draw_color_bar(scanline_buffer);
         }
         scanvideo_end_scanline_generation(scanline_buffer);
-        if (vga80 != last_vga80) {
-           if (vga80) {
+        if (vga80 != last_vga80)
+        {
+           if (vga80)
+           {
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_INVERT);
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_INVERT);
-           } else {
+           }
+           else
+           {
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_NORMAL);
               gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_NORMAL);
            }
            last_vga80 = vga80;
         }
-
-        uint genlock = genlock_enabled && !vga80;
-
-        if (genlock) {
-            static bool locked = false;
-            static int last_clkdiv = 0;
-            static int last_line = 0;
-
-            int line = scanvideo_get_next_scanline_id() & 0xFFFF;
-
-            // Calculate genlock correction on line 433 (at the end of the Atom active display)
-            if (line == 433 && line != last_line) {
-
-                // Read the current VSYNC offset (in us) and calculate difference from target
-                int error = read_vsync_offset() - GENLOCK_TARGET;
-
-                // Optimize the direction for correction
-                if (error < -9000) {
-                    error += 18000;
-                } else if (error > 9000) {
-                    error -= 18000;
-                }
-
-                // Now error is in range -9000 -> +9000
-                int delta = 0; // Default to no correction
-                if (locked) {
-                    // Locked
-                    if (abs(error) > GENLOCK_UNLOCKED_THRESHOLD) {
-                        // Lock lost
-                        locked = false;
-                        if (abs(error) < GENLOCK_COARSE_THRESHOLD) {
-                            delta = sign(error) * GENLOCK_FINE_DELTA;
-                        } else {
-                            delta = sign(error) * GENLOCK_COARSE_DELTA;
-                        }
-                    }
-                } else {
-                    // Unlocked
-                    if (abs(error) < GENLOCK_LOCKED_THRESHOLD) {
-                        // Lock regained
-                        locked = true;
-                    } else {
-                        if (abs(error) < GENLOCK_COARSE_THRESHOLD) {
-                            delta = sign(error) * GENLOCK_FINE_DELTA;
-                        } else {
-                            delta = sign(error) * GENLOCK_COARSE_DELTA;
-                        }
-                    }
-                }
-                int clkdiv = genlock_nominal + delta;
-                if (clkdiv != last_clkdiv) {
-#if defined(USE_MODE3)
-                    //timing_state.v_pulse_start = nominal_v_pulse_start + delta;
-                    timing_state.v_pulse_end = nominal_v_pulse_end + delta;
-                    timing_state.v_total = nominal_v_total + delta;
-                    set_clkdiv(clkdiv);
-#elif defined(USE_MODE2)
-                    timing_state.c = nominal_c + (delta << 16);
-                    timing_state.c_vblank = nominal_c_vblank + (delta << 16);
-#else
-                    set_clkdiv(clkdiv);
-#endif
-                    last_clkdiv = clkdiv;
-                }
-                printf("%c %d %d\r\n", (locked ? 'L' : 'U'), error, delta);
+#ifdef GENLOCK
+        genlock_mode_t genlock_mode = vga80 ? GENLOCK_OFF : genlock_setting;
+        if (genlock_mode != last_genlock_mode)
+        {
+            if (genlock)
+            {
+                genlock->destroy(genlock);
             }
-            last_line = line;
-        } else if (last_genlock) {
-            // Reset the clock to nominal when genlock is disabled
-#if defined(USE_MODE3)
-            timing_state.v_pulse_start = nominal_v_pulse_start;
-            timing_state.v_pulse_end = nominal_v_pulse_end;
-            timing_state.v_total = nominal_v_total;
-            set_clkdiv(PLL_SAFE);
-#elif defined(USE_MODE2)
-            timing_state.c = nominal_c;
-            timing_state.c_vblank = nominal_c_vblank;
-#else
-            set_clkdiv(PLL_SAFE);
-#endif
+            genlock = genlock_factory(genlock_mode);
+            if (genlock)
+            {
+                genlock->init(genlock);
+            }
+            last_genlock_mode = genlock_mode;
         }
-        last_genlock = genlock;
+        if (genlock)
+        {
+            int line = scanvideo_get_next_scanline_id() & 0xFFFF;
+            genlock->process_line(genlock, line);
+        }
+#endif
     }
 }
-
-
-#else
-
-
-void core1_func()
-{
-
-    // initialize video and interrupts on core 1
-    initialize_vga80();
-    scanvideo_setup(&vga_mode);
-    initialiseIO();
-    scanvideo_timing_enable(true);
-    sem_release(&video_initted);
-    uint last_vga80 = -1;
-    while (true) {
-        uint vga80 = memory[COL80_BASE] & COL80_ON;
-        scanvideo_scanline_buffer_t *scanline_buffer = scanvideo_begin_scanline_generation(true);
-        if (vga80) {
-            draw_color_bar_vga80(scanline_buffer);
-        } else {
-            draw_color_bar(scanline_buffer);
-        }
-        scanvideo_end_scanline_generation(scanline_buffer);
-        if (vga80 != last_vga80) {
-           if (vga80) {
-              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_INVERT);
-              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_INVERT);
-           } else {
-              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE, GPIO_OVERRIDE_NORMAL);
-              gpio_set_outover(PICO_SCANVIDEO_SYNC_PIN_BASE + 1, GPIO_OVERRIDE_NORMAL);
-           }
-           last_vga80 = vga80;
-        }
-    }
-}
-
-#endif
