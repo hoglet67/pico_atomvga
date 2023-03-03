@@ -33,22 +33,22 @@ typedef enum {
 } genlock_mode_t;
 
 typedef struct genlock {
-    // Target and parameters
-    int nominal;
+    // Target
     int vsync_target;
-    int coarse_threshold;
-    int coarse_delta;
-    int fine_delta;
-    int unlocked_threshold;
-    int locked_threshold;
+    // PD controller parameters
+    int nominal;
+    int min;
+    int max;
+    double coeff_a;
+    double coeff_b;
     // Functions
     void (*init)(struct genlock *);
     void (*post_init)(struct genlock *);
     void (*process_line)(struct genlock *, int line);
-    void (*apply_correction)(struct genlock *, int correction);
+    void (*update)(struct genlock *, int value);
     void (*destroy)(struct genlock *);
     // Variables
-    int current;
+    double current;
 } genlock_t;
 
 extern scanvideo_mode_t custom_mode;

@@ -35,15 +35,15 @@ scanvideo_mode_t custom_mode = {
 // Forward declarations, so structure definition can be placed at the top of this file
 static void common_process_line(genlock_t *genlock, int line);
 static void vary_clk_init(genlock_t *genlock);
-static void vary_clk_apply_correction(genlock_t *genlock, int correction);
+static void vary_clk_update(genlock_t *genlock, int value);
 static void vary_clk_destroy(genlock_t *genlock);
 #if USE_SCANVIDEO_PRIVATE
 static void vary_htotal_init(genlock_t *genlock);
 static void vary_htotal_post_init(genlock_t *genlock);
-static void vary_htotal_apply_correction(genlock_t *genlock, int correction);
+static void vary_htotal_update(genlock_t *genlock, int value);
 static void vary_htotal_destroy(genlock_t *genlock);
 static void vary_vtotal_init(genlock_t *genlock);
-static void vary_vtotal_apply_correction(genlock_t *genlock, int correction);
+static void vary_vtotal_update(genlock_t *genlock, int value);
 static void vary_vtotal_destroy(genlock_t *genlock);
 #endif
 
@@ -52,51 +52,45 @@ static genlock_t genlock_implementations[] = {
     }
     ,
     {
-        .nominal            = 0x4ff,  // Nominal value for the PIO clock divider
-        .vsync_target       = 14702,  // Target for genlock vsync offset (in us)
-        .coarse_threshold   =   128,  // Error threshold for applying coarse correction (in us)
-        .coarse_delta       =     3,  // Coarse correction delta for the PIO clock divider
-        .fine_delta         =     1,  // Fine correction delta for the PIO clock divider
-        .unlocked_threshold =    32,  // Error threshold for unlocking, i.e. restarting correction (in us)
-        .locked_threshold   =     8,  // Error threshold for locking, i.e. stopping correction (in us)
-
+        .vsync_target       =  14702, // Target for genlock vsync offset (in us)
+        .min                =  0x4f8, // Min value
+        .nominal            =  0x4ff, // Nominal value (for the PIO clock divider)
+        .max                =  0x508, // Max value
+        .coeff_a            = -0.002, // Controller: error derivative term
+        .coeff_b            = -0.001, // Controller: error term
         .init               = vary_clk_init,
         .process_line       = common_process_line,
-        .apply_correction   = vary_clk_apply_correction,
+        .update             = vary_clk_update,
         .destroy            = vary_clk_destroy
 
     }
 #if USE_SCANVIDEO_PRIVATE
     ,
     {
-        .nominal            =     6,  // Nominal value for the h_total offset
-        .vsync_target       = 14686,  // Target for genlock vsync offset (in us)
-        .coarse_threshold   =   256,  // Error threshold for applying coarse correction (in us)
-        .coarse_delta       =     6,  // Coarse correction delta for the h_total offset
-        .fine_delta         =     2,  // Fine correction delta for the h_total offset
-        .unlocked_threshold =     8,  // Error threshold for unlocking, i.e. restarting correction (in us)
-        .locked_threshold   =     4,  // Error threshold for locking, i.e. stopping correction (in us)
-
+        .vsync_target       =  14702, // Target for genlock vsync offset (in us)
+        .min                =    -16, // Min value
+        .nominal            =     -6, // Nominal value (for h_total)
+        .max                =      4, // Max value
+        .coeff_a            =  -0.06, // Controller: error derivative term
+        .coeff_b            =  -0.02, // Controller: error term
         .init               = vary_htotal_init,
         .post_init          = vary_htotal_post_init,
         .process_line       = common_process_line,
-        .apply_correction   = vary_htotal_apply_correction,
+        .update             = vary_htotal_update,
         .destroy            = vary_htotal_destroy
 
     }
     ,
     {
-        .nominal            =     0,  // Nominal value for the v_total offset
-        .vsync_target       = 14686,  // Target for genlock vsync offset (in us)
-        .coarse_threshold   =   256,  // Error threshold for applying coarse correction (in us)
-        .coarse_delta       =     2,  // Coarse correction delta for the v_total offset
-        .fine_delta         =     1,  // Fine correction delta for the v_total offset
-        .unlocked_threshold =    32,  // Error threshold for unlocking, i.e. restarting correction (in us)
-        .locked_threshold   =     8,  // Error threshold for locking, i.e. stopping correction (in us)
-
+        .vsync_target       =  14702, // Target for genlock vsync offset (in us)
+        .min                =    523, // Min value
+        .nominal            =    524, // Nominal value (for v_total)
+        .max                =    525, // Max value
+        .coeff_a            = -0.002, // Controller: error derivative term
+        .coeff_b            = -0.001, // Controller: error term
         .init               = vary_vtotal_init,
         .process_line       = common_process_line,
-        .apply_correction   = vary_vtotal_apply_correction,
+        .update             = vary_vtotal_update,
         .destroy            = vary_vtotal_destroy
     }
 #endif
@@ -175,16 +169,11 @@ static uint read_vsync_offset() {
     return result;
 }
 
-// Return the sign of the integer x (-1, 0 or 1)
-static int sign(int x) {
-    return (x > 0) - (x < 0);
-}
-
 // Update genlock state on the new line
 static void common_process_line(genlock_t *genlock, int line) {
 
-    static bool locked = false;
     static int last_line = 0;
+    static int last_error = 0;
 
     // Second phase of init
     if (init_pending && line == 1) {
@@ -198,7 +187,7 @@ static void common_process_line(genlock_t *genlock, int line) {
     if (line == 433 && line != last_line) {
 
         // Read the current VSYNC offset (in us) and calculate difference from target
-        int error = read_vsync_offset() - genlock->vsync_target;
+        int error = genlock->vsync_target - read_vsync_offset();
 
         // Optimize the direction for correction
         if (error < -9000) {
@@ -207,36 +196,24 @@ static void common_process_line(genlock_t *genlock, int line) {
             error -= 18000;
         }
 
-        // Now error is in range -9000 -> +9000
-        int delta = 0; // Default to no correction
-        if (locked) {
-            // Locked
-            if (abs(error) > genlock->unlocked_threshold) {
-                // Lock lost
-                locked = false;
-                if (abs(error) < genlock->coarse_threshold) {
-                    delta = sign(error) * genlock->fine_delta;
-                } else {
-                    delta = sign(error) * genlock->coarse_delta;
-                }
-            }
-        } else {
-            // Unlocked
-            if (abs(error) < genlock->locked_threshold) {
-                // Lock regained
-                locked = true;
-            } else {
-                if (abs(error) < genlock->coarse_threshold) {
-                    delta = sign(error) * genlock->fine_delta;
-                } else {
-                    delta = sign(error) * genlock->coarse_delta;
-                }
-            }
+        int previous  = (int) genlock->current;
+
+        genlock->current += ((double) (error - last_error)) * genlock->coeff_a + ((double) error) * genlock->coeff_b;
+
+        if (genlock->current < genlock->min) {
+            genlock->current = genlock->min;
+        } else if (genlock->current > genlock->max) {
+            genlock->current = genlock->max;
         }
-        if (genlock->nominal + delta != genlock->current) {
-            genlock->apply_correction(genlock, delta);
+
+        int next = (int) genlock->current;
+        if (next != previous) {
+            genlock->update(genlock, next);
         }
-        printf("%c %d %d\r\n", (locked ? 'L' : 'U'), error, delta);
+
+        printf("%4d %4d %4d\r\n", error, error - last_error, next);
+
+        last_error = error;
     }
     last_line = line;
 }
@@ -271,12 +248,10 @@ static inline void set_clkdiv(uint i) {
 
 void vary_clk_init(genlock_t *genlock) {
     genlock->current = genlock->nominal;
-    set_clkdiv(genlock->current);
 }
 
-void vary_clk_apply_correction(genlock_t *genlock, int correction) {
-    genlock->current = genlock->nominal + correction;
-    set_clkdiv(genlock->current);
+void vary_clk_update(genlock_t *genlock, int value) {
+    set_clkdiv(value);
 }
 
 void vary_clk_destroy(genlock_t *genlock) {
@@ -298,7 +273,6 @@ void vary_clk_destroy(genlock_t *genlock) {
 
 static uint32_t nominal_c;
 static uint32_t nominal_c_vblank;
-
 
 // The a, a_vblank, b1, b2, c, c_vblank are pixel counts for various
 // parts of the horizontal line. Their effective values need
@@ -345,6 +319,8 @@ uint32_t patch_htiming(uint32_t value) {
 
 void vary_htotal_init(genlock_t *genlock) {
 
+    genlock->current = genlock->nominal;
+
     save_timing_state();
 
     // Patch all the htiming state variables to maintain the same
@@ -357,6 +333,9 @@ void vary_htotal_init(genlock_t *genlock) {
     timing_state.b2       = patch_htiming(timing_state.b2       );
     timing_state.c        = patch_htiming(timing_state.c        );
     timing_state.c_vblank = patch_htiming(timing_state.c_vblank );
+
+    nominal_c        = timing_state.c;
+    nominal_c_vblank = timing_state.c_vblank;
 
     init_pending = 1;
 }
@@ -378,10 +357,6 @@ static void vary_htotal_post_init(genlock_t *genlock) {
     //
     SCANVIDEO_PIO->instr_mem[video_htiming_load_offset + 5] = pio_encode_jmp_x_dec(video_htiming_load_offset + 5);
 
-    // Apply the initial correction
-    nominal_c        = timing_state.c        - (genlock->nominal << 16);
-    nominal_c_vblank = timing_state.c_vblank - (genlock->nominal << 16);
-
     // 5x of the 10x increase comes from reducing the PIO clock
     // divider used by video_htiming state machine from 5 to 1
     pio_sm_set_clkdiv_int_frac(SCANVIDEO_PIO, SCANVIDEO_SCANLINE_SM, 5, 0);
@@ -389,14 +364,13 @@ static void vary_htotal_post_init(genlock_t *genlock) {
     pio_clkdiv_restart_sm_mask(SCANVIDEO_PIO, (1<<SCANVIDEO_SCANLINE_SM | 1 << SCANVIDEO_TIMING_SM));
 }
 
-void vary_htotal_apply_correction(genlock_t *genlock, int correction) {
-    genlock->current = genlock->nominal + correction;
-    if (correction < 0) {
-        timing_state.c = nominal_c - (-correction << 16);
-        timing_state.c_vblank = nominal_c_vblank - (-correction << 16);
+void vary_htotal_update(genlock_t *genlock, int value) {
+    if (value < 0) {
+        timing_state.c        = nominal_c - (-value << 16);
+        timing_state.c_vblank = nominal_c_vblank - (-value << 16);
     } else {
-        timing_state.c = nominal_c + (correction << 16);
-        timing_state.c_vblank = nominal_c_vblank + (correction << 16);
+        timing_state.c        = nominal_c + (value << 16);
+        timing_state.c_vblank = nominal_c_vblank + (value << 16);
     }
 }
 
@@ -414,25 +388,21 @@ void vary_htotal_destroy(genlock_t *genlock) {
 
 #if USE_SCANVIDEO_PRIVATE
 
-static int nominal_v_total;
-static int nominal_v_pulse_end;
+static int v_back_porch = 0;
 
 void vary_vtotal_init(genlock_t *genlock) {
+    genlock->current = genlock->nominal;
     save_timing_state();
     printf("v_total = %ld\r\n", timing_state.v_total);
     printf("v_active = %ld\r\n", timing_state.v_active);
     printf("v_pulse_start = %ld\r\n", timing_state.v_pulse_start);
     printf("v_pulse_end = %ld\r\n", timing_state.v_pulse_end);
-    nominal_v_total           = timing_state.v_total;
-    nominal_v_pulse_end       = timing_state.v_pulse_end;
-    timing_state.v_total     += genlock->nominal;
-    timing_state.v_pulse_end += genlock->nominal;
+    v_back_porch = timing_state.v_total - timing_state.v_pulse_end;
 }
 
-void vary_vtotal_apply_correction(genlock_t *genlock, int correction) {
-    genlock->current = genlock->nominal + correction;
-    timing_state.v_pulse_end = nominal_v_pulse_end + correction;
-    timing_state.v_total     = nominal_v_total     + correction;
+void vary_vtotal_update(genlock_t *genlock, int value) {
+    timing_state.v_total     = value;
+    timing_state.v_pulse_end = value - v_back_porch;
 }
 
 void vary_vtotal_destroy(genlock_t *genlock) {
