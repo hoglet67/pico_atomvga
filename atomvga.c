@@ -601,6 +601,14 @@ void check_command()
         }
         ClearCommand();
     }
+    else if (is_command("GENDEBUG",&params))
+    {
+        if (uint8_param(params,&temp,0,1))
+        {
+            genlock_debug(temp);
+        }
+        ClearCommand();
+    }
 #endif
 }
 #elif (PLATFORM == PLATFORM_DRAGON)
@@ -1272,18 +1280,18 @@ void core1_func()
         genlock_mode_t genlock_mode = vga80 ? GENLOCK_OFF : genlock_setting;
         if (genlock_mode != last_genlock_mode)
         {
-            if (genlock)
+            if (genlock && genlock->destroy)
             {
                 genlock->destroy(genlock);
             }
             genlock = genlock_factory(genlock_mode);
-            if (genlock)
+            if (genlock && genlock->init)
             {
                 genlock->init(genlock);
             }
             last_genlock_mode = genlock_mode;
         }
-        if (genlock)
+        if (genlock && genlock->process_line)
         {
             int line = scanvideo_get_next_scanline_id() & 0xFFFF;
             genlock->process_line(genlock, line);

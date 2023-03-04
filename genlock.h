@@ -55,6 +55,8 @@ extern scanvideo_mode_t custom_mode;
 
 void genlock_initialize();
 
+void genlock_debug(int on);
+
 genlock_t *genlock_factory(genlock_mode_t mode);
 
 #endif

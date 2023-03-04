@@ -34,6 +34,8 @@ scanvideo_mode_t custom_mode = {
 
 // Forward declarations, so structure definition can be placed at the top of this file
 static void common_process_line(genlock_t *genlock, int line);
+static void off_init(genlock_t *genlock);
+static void off_destroy(genlock_t *genlock);
 static void vary_clk_init(genlock_t *genlock);
 static void vary_clk_update(genlock_t *genlock, int value);
 static void vary_clk_destroy(genlock_t *genlock);
@@ -49,36 +51,36 @@ static void vary_vtotal_destroy(genlock_t *genlock);
 
 static genlock_t genlock_implementations[] = {
     {
+        .init               = off_init,
+        .destroy            = off_destroy
     }
     ,
     {
-        .vsync_target       =  14702, // Target for genlock vsync offset (in us)
+        .vsync_target       =  14686, // Target for genlock vsync offset (in us)
         .min                =  0x4f8, // Min value
         .nominal            =  0x4ff, // Nominal value (for the PIO clock divider)
         .max                =  0x508, // Max value
-        .coeff_a            = -0.002, // Controller: error derivative term
-        .coeff_b            = -0.001, // Controller: error term
+        .coeff_a            = -0.016, // Controller: error derivative term
+        .coeff_b            = -0.0016, // Controller: error term
         .init               = vary_clk_init,
         .process_line       = common_process_line,
         .update             = vary_clk_update,
         .destroy            = vary_clk_destroy
-
     }
 #if USE_SCANVIDEO_PRIVATE
     ,
     {
-        .vsync_target       =  14702, // Target for genlock vsync offset (in us)
-        .min                =    -16, // Min value
+        .vsync_target       =  14686, // Target for genlock vsync offset (in us)
+        .min                =    -26, // Min value
         .nominal            =     -6, // Nominal value (for h_total)
-        .max                =      4, // Max value
-        .coeff_a            =  -0.06, // Controller: error derivative term
-        .coeff_b            =  -0.02, // Controller: error term
+        .max                =     14, // Max value
+        .coeff_a            =  -0.10, // Controller: error derivative term
+        .coeff_b            =  -0.01, // Controller: error term
         .init               = vary_htotal_init,
         .post_init          = vary_htotal_post_init,
         .process_line       = common_process_line,
         .update             = vary_htotal_update,
         .destroy            = vary_htotal_destroy
-
     }
     ,
     {
@@ -86,8 +88,8 @@ static genlock_t genlock_implementations[] = {
         .min                =    523, // Min value
         .nominal            =    524, // Nominal value (for v_total)
         .max                =    525, // Max value
-        .coeff_a            = -0.002, // Controller: error derivative term
-        .coeff_b            = -0.001, // Controller: error term
+        .coeff_a            = -0.00655, // Controller: error derivative term
+        .coeff_b            = -0.000655, // Controller: error term
         .init               = vary_vtotal_init,
         .process_line       = common_process_line,
         .update             = vary_vtotal_update,
@@ -96,9 +98,15 @@ static genlock_t genlock_implementations[] = {
 #endif
 };
 
+// ======================================================================
+// Static global variables
+// ======================================================================
+
 static int original_clkdiv;
 
 static int init_pending = 0;
+
+static int debug = 0;
 
 // ======================================================================
 // Optional code that delves into the innards of scanvideo
@@ -209,15 +217,18 @@ static void common_process_line(genlock_t *genlock, int line) {
         int next = (int) genlock->current;
         if (next != previous) {
             genlock->update(genlock, next);
+            if (debug) {
+                printf("%4d %4d %4d\r\n", error, error - last_error, next);
+            }
         }
-
-        printf("%4d %4d %4d\r\n", error, error - last_error, next);
-
         last_error = error;
     }
     last_line = line;
 }
 
+// ======================================================================
+// Public interface
+// ======================================================================
 
 void genlock_initialize() {
     // Load PIO state machine to track the offset between VGA VS and Atom FS
@@ -228,12 +239,29 @@ void genlock_initialize() {
     original_clkdiv = SCANVIDEO_PIO->sm[SCANVIDEO_SCANLINE_SM].clkdiv >> PIO_SM0_CLKDIV_FRAC_LSB;
 }
 
+void genlock_debug(int on) {
+    debug = on;
+}
+
 genlock_t *genlock_factory(genlock_mode_t mode) {
-    if (mode > GENLOCK_OFF && mode < GENLOCK_NUM_MODES) {
+    if (mode < GENLOCK_NUM_MODES) {
         return &genlock_implementations[mode];
     } else {
-        return NULL; // there isn't actually an implementation for glenlock off
+        return NULL;
     }
+}
+
+// ======================================================================
+// Genlock Mode 0: Genlock off
+// ======================================================================
+
+void off_init(genlock_t *genlock) {
+    if (debug) {
+        printf("Genlock mode 0: Genlock off\r\n");
+    }
+}
+
+void off_destroy(genlock_t *genlock) {
 }
 
 // ======================================================================
@@ -247,6 +275,9 @@ static inline void set_clkdiv(uint i) {
 }
 
 void vary_clk_init(genlock_t *genlock) {
+    if (debug) {
+        printf("Genlock mode 1: Genlock by varying clkdiv\r\n");
+    }
     genlock->current = genlock->nominal;
 }
 
@@ -318,6 +349,9 @@ uint32_t patch_htiming(uint32_t value) {
 }
 
 void vary_htotal_init(genlock_t *genlock) {
+    if (debug) {
+        printf("Genlock mode 2: Genlock by varying htotal\r\n");
+    }
 
     genlock->current = genlock->nominal;
 
@@ -359,7 +393,7 @@ static void vary_htotal_post_init(genlock_t *genlock) {
 
     // 5x of the 10x increase comes from reducing the PIO clock
     // divider used by video_htiming state machine from 5 to 1
-    pio_sm_set_clkdiv_int_frac(SCANVIDEO_PIO, SCANVIDEO_SCANLINE_SM, 5, 0);
+    pio_sm_set_clkdiv_int_frac(SCANVIDEO_PIO, SCANVIDEO_SCANLINE_SM, 4, 255);
     pio_sm_set_clkdiv_int_frac(SCANVIDEO_PIO, SCANVIDEO_TIMING_SM, 1, 0);
     pio_clkdiv_restart_sm_mask(SCANVIDEO_PIO, (1<<SCANVIDEO_SCANLINE_SM | 1 << SCANVIDEO_TIMING_SM));
 }
@@ -391,12 +425,11 @@ void vary_htotal_destroy(genlock_t *genlock) {
 static int v_back_porch = 0;
 
 void vary_vtotal_init(genlock_t *genlock) {
+    if (debug) {
+        printf("Genlock mode 3: Genlock by varying vtotal\r\n");
+    }
     genlock->current = genlock->nominal;
     save_timing_state();
-    printf("v_total = %ld\r\n", timing_state.v_total);
-    printf("v_active = %ld\r\n", timing_state.v_active);
-    printf("v_pulse_start = %ld\r\n", timing_state.v_pulse_start);
-    printf("v_pulse_end = %ld\r\n", timing_state.v_pulse_end);
     v_back_porch = timing_state.v_total - timing_state.v_pulse_end;
 }
 
