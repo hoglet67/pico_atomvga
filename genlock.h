@@ -27,12 +27,16 @@ typedef enum {
     GENLOCK_VARY_CLK,
 #if USE_SCANVIDEO_PRIVATE
     GENLOCK_VARY_HTOTAL,
-    GENLOCK_VARY_VTOTAL,
+    GENLOCK_VARY_VTOTAL_ALT1,
+    GENLOCK_VARY_VTOTAL_ALT2,
+    GENLOCK_VARY_VTOTAL_ALT3,
 #endif
     GENLOCK_NUM_MODES
 } genlock_mode_t;
 
 typedef struct genlock {
+    // Mode number
+    int mode;
     // Target
     int vsync_target;
     // PD controller parameters
