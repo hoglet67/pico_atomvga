@@ -8,7 +8,7 @@ project(atomvga_project)
 
 pico_sdk_init()
 
-set( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -Wall -Wextra -Wno-unused-parameter" )
+set( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-parameter" )
 
 #
 # Atom Build
