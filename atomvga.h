@@ -1,6 +1,11 @@
 #ifndef ATOMVGA_H_
 #define ATOMVGA_H_
 
+// Option for two levels of orange: normal for semi-graphics and bright for text
+#ifndef INCLUDE_BRIGHT_ORANGE
+#define INCLUDE_BRIGHT_ORANGE 0
+#endif
+
 #define RED_1 0x0400
 #define RED_2 0x0800
 #define RED 0x0C00
@@ -21,10 +26,15 @@
 #define WHITE_2 (WHITE_1 << 1)
 #define COLOUR YELLOW
 #define CYAN (GREEN | BLUE)
+#if INCLUDE_BRIGHT_ORANGE
+#define ORANGE (RED | GREEN_1)
+#define BRIGHT_ORANGE (RED | GREEN_2)
+#else
 #define ORANGE (RED | GREEN_2)
+#endif
 #define MAGENTA (RED | BLUE)
 
-#define NO_COLOURS  9
+#define NO_COLOURS  (9+INCLUDE_BRIGHT_ORANGE)
 uint16_t colour_palette_atom[NO_COLOURS] = {
     GREEN,
     YELLOW,
@@ -35,6 +45,9 @@ uint16_t colour_palette_atom[NO_COLOURS] = {
     MAGENTA,
     ORANGE,
     BLACK
+#if INCLUDE_BRIGHT_ORANGE
+    , BRIGHT_ORANGE
+#endif
 };
 
 #define IDX_GREEN   0
@@ -47,12 +60,21 @@ uint16_t colour_palette_atom[NO_COLOURS] = {
 #define IDX_ORANGE  7
 #define IDX_BLACK   8
 
-#define MAX_COLOUR  8
+#define MAX_COLOUR (8+INCLUDE_BRIGHT_ORANGE)
+
+#if INCLUDE_BRIGHT_ORANGE
+#define IDX_BRIGHT_ORANGE 9
+#endif
+
 
 #define DEF_INK     GREEN 
 #define DEF_PAPER   BLACK
-#define DEF_INK_ALT ORANGE
 
+#if INCLUDE_BRIGHT_ORANGE
+#define DEF_INK_ALT BRIGHT_ORANGE
+#else
+#define DEF_INK_ALT ORANGE
+#endif
 
 uint16_t colour_palette_vga80[8] = {
     BLACK,
